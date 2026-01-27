@@ -1,14 +1,14 @@
-# Flowmango 2D Game Engine
+# Quartz 2D Game Engine
 
 <p align="center">
-  <img src="./logo/flowmango-full.png" alt="Flowmango Logo" width="400"/>
+  <img src="./logo/quartz.png" alt="Quartz Logo" width="400"/>
 </p>
 
 A Rust-based 2D game engine built on top of the Prism framework, designed for creating interactive games with physics, animations, and event-driven gameplay.
 
 ## Overview
 
-Flowmango provides a high-level abstraction for building 2D games with:
+Quartz provides a high-level abstraction for building 2D games with:
 
 - **Canvas-based rendering** with automatic scaling and aspect ratio management
 - **GameObject system** with physics (gravity, momentum, resistance) and platform support
@@ -270,7 +270,7 @@ canvas.on_tick(move |canvas| {
 
 ## Physics System
 
-Flowmango has a built-in physics system that runs every frame (60 FPS):
+Quartz has a built-in physics system that runs every frame (60 FPS):
 
 1. **Gravity**: Added to vertical momentum each frame
 2. **Momentum**: Position updated by momentum values
@@ -287,9 +287,9 @@ Flowmango has a built-in physics system that runs every frame (60 FPS):
 
 ## Complete Example: Simple Platformer
 ```rust
-use flowmango::{Key, Context, Image, ShapeType, Canvas, GameObject, 
-                Action, Target, GameEvent, CanvasMode, Location, 
-                Condition, Anchor};
+use quartz::{Key, Context, Image, ShapeType, Canvas, GameObject, 
+             Action, Target, GameEvent, CanvasMode, Location, 
+             Condition, Anchor};
 use ramp::prism;
 use prism::drawable::Drawable;
 
@@ -602,4 +602,4 @@ Built on top of the Prism framework. Check your Prism license for usage terms.
 
 ---
 
-**Created with ❤️  using Rust**
+**Created with ❤️ using Rust**
