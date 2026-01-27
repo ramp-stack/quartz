@@ -1,0 +1,10 @@
+[package]
+name = "quartz"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = "0.25.9"
+prism = { path = "../prism", package = "prism2"}
+
+
