@@ -4,292 +4,839 @@
   <img src="./logo/quartz.png" alt="Quartz Logo" width="400"/>
 </p>
 
-A Rust-based 2D game engine built on top of the Prism framework, designed for creating interactive games with physics, animations, and event-driven gameplay.
+A Rust 2D game engine built on Prism with physics, animations, and event-driven gameplay.
 
-## Overview
+## Canvas
 
-Quartz provides a high-level abstraction for building 2D games with:
-
-- **Canvas-based rendering** with automatic scaling and aspect ratio management
-- **GameObject system** with physics (gravity, momentum, resistance) and platform support
-- **Event-driven architecture** for collisions, keyboard input, and conditional logic
-- **Animated sprite support** with GIF animation loading
-- **Tag-based targeting** for flexible object management
-- **Anchor-based positioning** for relative object placement
-- **Visibility toggling** and conditional actions
-
-## Core Concepts
-
-### Canvas
-
-The `Canvas` is your game world. It manages all game objects, handles layout scaling, and processes events.
+The game world that manages objects and scaling.
 ```rust
 let mut canvas = Canvas::new(ctx, CanvasMode::Landscape);
+// CanvasMode::Landscape = 3840×2160 (16:9)
+// CanvasMode::Portrait = 2160×3840 (9:16)
 ```
 
-**Canvas Modes:**
-- `CanvasMode::Landscape`: 3840×2160 virtual resolution (16:9)
-- `CanvasMode::Portrait`: 2160×3840 virtual resolution (9:16)
-
-The canvas automatically scales to fit any screen size while maintaining aspect ratio and letterboxing when necessary.
-
-### GameObject
-
-GameObjects are the entities in your game. Each has:
-
-- **Identity**: Unique ID and tags for flexible targeting
-- **Position & Size**: Location and dimensions in virtual coordinates
-- **Physics**: Momentum, resistance, and gravity
-- **Visuals**: Static images or animated sprites
-- **Visibility**: Can be shown/hidden
-- **Platform Properties**: Can act as platforms for other objects to stand on
-
-**Creating GameObjects:**
+### canvas.add_game_object()
+Adds a GameObject to the canvas.
 ```rust
-// Square GameObject
-let player = GameObject::new(
-    ctx,
-    "player".to_string(),      // id
-    image,                      // Image
-    100.0,                      // size (creates 100x100)
-    (200.0, 300.0),            // position (x, y)
-    vec!["player".to_string()], // tags
-    (0.0, 0.0),                // initial momentum (x, y)
-    (0.95, 0.95),              // resistance (x, y) - multiplied each frame
-    0.5,                        // gravity - added to y momentum each frame
-);
-
-// Rectangular GameObject
-let background = GameObject::new_rect(
-    ctx,
-    "bg".to_string(),
-    bg_image,
-    (3840.0, 2160.0),          // size (width, height)
-    (0.0, 0.0),
-    vec!["background".to_string()],
-    (0.0, 0.0),
-    (1.0, 1.0),
-    0.0,
-);
-
-// Platform GameObject
-let platform = GameObject::new_rect(ctx, ...)
-    .as_platform();  // Makes object solid - other objects can stand on it
+canvas.add_game_object("player".to_string(), player_object);
 ```
 
-### Animated Sprites
-
-Load GIF animations and attach them to GameObjects:
+### canvas.remove_game_object()
+Removes a GameObject by name.
 ```rust
-let animation = AnimatedSprite::new(
-    gif_bytes,              // &[u8] - use include_bytes!()
-    (50.0, 35.0),          // size in virtual coordinates
-    12.0                    // frames per second
-).expect("Failed to load animation");
-
-let animated_object = GameObject::new_rect(ctx, ...)
-    .with_animation(animation);
+canvas.remove_game_object("enemy");
 ```
 
-### Targeting System
-
-Target objects in three ways:
+### canvas.get_game_object()
+Gets an immutable reference to a GameObject.
 ```rust
-Target::ById("enemy_1".to_string())         // Target by ID
-Target::ByTag("enemies".to_string())        // Target all objects with tag
+let obj = canvas.get_game_object("player");
+if let Some(player) = obj {
+    println!("Position: {:?}", player.position);
+}
 ```
 
-### Actions
-
-Actions modify game objects:
+### canvas.get_game_object_mut()
+Gets a mutable reference to modify a GameObject directly.
 ```rust
-// Add to existing momentum (for jumps, boosts)
-Action::ApplyMomentum { 
+if let Some(player) = canvas.get_game_object_mut("player") {
+    player.visible = false;
+    player.position = (100.0, 200.0);
+}
+```
+
+### canvas.run()
+Executes an action immediately. This is the main way to modify game state programmatically.
+```rust
+// Make player jump
+canvas.run(Action::ApplyMomentum {
     target: Target::ById("player".to_string()),
-    value: (0.0, -10.0)  // negative y = upward
-}
+    value: (0.0, -20.0)
+});
 
-// Set momentum directly (for stopping, movement)
-Action::SetMomentum { 
-    target: Target::ByTag("bullets".to_string()),
-    value: (5.0, 0.0)
-}
-
-// Change resistance (for ice, friction changes)
-Action::SetResistance { 
-    target: Target::ById("player".to_string()),
-    value: (0.99, 0.99)  // less resistance = slides more
-}
-
-// Remove objects
-Action::Remove { 
+// Remove all enemies
+canvas.run(Action::Remove {
     target: Target::ByTag("enemies".to_string())
-}
+});
 
-// Spawn new objects
-Action::Spawn {
+// Spawn bullet at player position
+canvas.run(Action::Spawn {
     object: Box::new(bullet),
     location: Location::AtTarget(Box::new(Target::ById("player".to_string())))
-}
-
-// Change animations
-Action::SetAnimation {
-    target: Target::ById("player".to_string()),
-    animation_bytes: include_bytes!("../assets/running.gif"),
-    fps: 16.0
-}
-
-// Toggle visibility
-Action::Toggle {
-    target: Target::ById("powerup".to_string())
-}
-
-// Teleport to position
-Action::Teleport {
-    target: Target::ById("player".to_string()),
-    location: Location::OnTarget {
-        target: Box::new(Target::ById("platform".to_string())),
-        anchor: Anchor::TopCenter,
-        offset: (0.0, -50.0)
-    }
-}
-
-// Conditional actions
-Action::Conditional {
-    condition: Condition::IsVisible(Target::ById("key".to_string())),
-    if_true: Box::new(Action::Remove { target: Target::ById("door".to_string()) }),
-    if_false: None
-}
+});
 ```
 
-### Conditions
-
-Conditions check game state before executing actions:
+### canvas.add_event()
+Registers an event that triggers actions automatically when conditions are met.
 ```rust
-// Check if object is visible
-Condition::IsVisible(Target::ById("indicator".to_string()))
-
-// Use in conditional actions
-Action::Conditional {
-    condition: Condition::IsVisible(Target::ById("power_mode".to_string())),
-    if_true: Box::new(Action::SetMomentum { 
-        target: Target::ById("player".to_string()),
-        value: (20.0, 0.0)  // Fast movement
-    }),
-    if_false: Some(Box::new(Action::SetMomentum {
-        target: Target::ById("player".to_string()),
-        value: (5.0, 0.0)   // Normal movement
-    }))
-}
-```
-
-### Anchors
-
-Position objects relative to other objects using anchors:
-```rust
-// Available anchors
-Anchor::TopLeft
-Anchor::TopCenter
-Anchor::TopRight
-Anchor::CenterLeft
-Anchor::Center
-Anchor::CenterRight
-Anchor::BottomLeft
-Anchor::BottomCenter
-Anchor::BottomRight
-
-// Example: Place companion to the right of player
-Action::Teleport {
-    target: Target::ById("companion".to_string()),
-    location: Location::OnTarget {
-        target: Box::new(Target::ById("player".to_string())),
-        anchor: Anchor::BottomRight,  // Anchor to player's bottom-right
-        offset: (50.0, 0.0)           // 50px to the right
-    }
-}
-```
-
-### Events
-
-Connect game events to actions:
-```rust
-// Keyboard input
+// Jump when W is pressed
 canvas.add_event(
     GameEvent::KeyPress {
         key: Key::Character("w".to_string().into()),
         action: Action::ApplyMomentum {
             target: Target::ById("player".to_string()),
-            value: (0.0, -10.5)
+            value: (0.0, -15.0)
         },
         target: Target::ById("player".to_string())
     },
     Target::ById("player".to_string())
 );
 
-// Collision between objects
+// Remove bullet on collision
 canvas.add_event(
     GameEvent::Collision {
         action: Action::Remove {
-            target: Target::ById("enemy".to_string())
+            target: Target::ById("bullet".to_string())
         },
         target: Target::ById("bullet".to_string())
     },
     Target::ById("bullet".to_string())
 );
-
-// Boundary collision (hitting canvas edges)
-canvas.add_event(
-    GameEvent::BoundaryCollision {
-        action: Action::SetMomentum {
-            target: Target::ById("ball".to_string()),
-            value: (0.0, 0.0)
-        },
-        target: Target::ById("ball".to_string())
-    },
-    Target::ById("ball".to_string())
-);
 ```
 
-### Custom Tick Updates
-
-Run custom logic every frame using the `on_tick` callback:
+### canvas.on_tick()
+Runs custom code every frame (~60 FPS). Use for game logic that needs to run continuously.
 ```rust
-let mut counter = 0u32;
+let mut counter = 0;
 canvas.on_tick(move |canvas| {
     counter += 1;
-    
-    // Toggle visibility every 300 frames (~5 seconds at 60fps)
-    if counter >= 300 {
+    if counter >= 60 {  // Every second
         counter = 0;
-        if let Some(obj) = canvas.get_game_object_mut("powerup") {
-            obj.visible = !obj.visible;
+        // Spawn enemy
+        if let Some(player) = canvas.get_game_object("player") {
+            println!("Player at: {:?}", player.position);
         }
     }
 });
 ```
 
-## Physics System
-
-Quartz has a built-in physics system that runs every frame (60 FPS):
-
-1. **Gravity**: Added to vertical momentum each frame
-2. **Momentum**: Position updated by momentum values
-3. **Resistance**: Momentum multiplied by resistance (friction/drag)
-4. **Platform Collision**: Objects land on platforms and stop falling
-5. **Collision Detection**: Automatic AABB collision detection between all objects
-
-**Physics Tips:**
-- Gravity of `1.2` with resistance `(0.98, 0.98)` works well for platformers
-- Resistance of `(1.0, 1.0)` = no friction (objects never slow down)
-- Resistance of `(0.0, 0.0)` = instant stop
-- Negative momentum = movement left/up, positive = right/down
-- Use `.as_platform()` to make objects solid for others to stand on
-
-## Complete Example: Simple Platformer
+### canvas.collision_between()
+Checks if two targets are colliding right now.
 ```rust
-use quartz::{Key, Context, Image, ShapeType, Canvas, GameObject, 
-             Action, Target, GameEvent, CanvasMode, Location, 
-             Condition, Anchor};
+if canvas.collision_between(
+    &Target::ById("player".to_string()),
+    &Target::ByTag("enemies".to_string())
+) {
+    // Player hit enemy!
+    canvas.run(Action::Remove {
+        target: Target::ById("player".to_string())
+    });
+}
+```
+
+### canvas.show() / hide() / toggle_visibility()
+Control object visibility by name.
+```rust
+canvas.show("powerup");
+canvas.hide("secret_door");
+canvas.toggle_visibility("indicator");
+```
+
+### canvas.is_visible()
+Check if object is visible.
+```rust
+if canvas.is_visible("key") {
+    canvas.show("door");
+}
+```
+
+### canvas.get_virtual_size()
+Gets the virtual canvas size (before scaling).
+```rust
+let (width, height) = canvas.get_virtual_size();
+// Landscape: (3840.0, 2160.0)
+// Portrait: (2160.0, 3840.0)
+```
+
+### canvas.get_scale()
+Gets the current scaling factor from virtual to actual screen size.
+```rust
+let scale = canvas.get_scale();
+```
+
+### canvas.get_mode()
+Gets the canvas mode.
+```rust
+let mode = canvas.get_mode();
+// CanvasMode::Landscape or CanvasMode::Portrait
+```
+
+### canvas.is_key_held()
+Check if a key is currently pressed down.
+```rust
+if canvas.is_key_held(&Key::Character("w".to_string().into())) {
+    // W key is held down
+}
+```
+
+### canvas.handle_infinite_scroll()
+Automatically repositions objects tagged with "scroll" for infinite scrolling backgrounds. Called automatically each frame.
+```rust
+// Tag background objects with "scroll"
+let bg1 = GameObject::new_rect(
+    ctx, "bg1".to_string(), bg_image,
+    (3840.0, 2160.0), (0.0, 0.0),
+    vec!["scroll".to_string()],  // This tag enables auto-scrolling
+    (-5.0, 0.0), (1.0, 1.0), 0.0
+);
+```
+
+## GameObject
+
+Game entities with physics and visuals.
+
+### GameObject::new()
+Creates a square GameObject.
+```rust
+let player = GameObject::new(
+    ctx,
+    "player_id".to_string(),     // Unique ID
+    image,                        // Image to display
+    100.0,                        // Size (100×100 square)
+    (200.0, 300.0),              // Position (x, y)
+    vec!["player".to_string()],  // Tags for targeting
+    (0.0, 0.0),                  // Initial momentum (vx, vy)
+    (0.95, 0.95),                // Resistance (friction, 0.0-1.0)
+    0.5,                          // Gravity (added to vy each frame)
+);
+```
+
+### GameObject::new_rect()
+Creates a rectangular GameObject (width and height can differ).
+```rust
+let platform = GameObject::new_rect(
+    ctx,
+    "platform".to_string(),
+    image,
+    (800.0, 50.0),               // Width × Height
+    (0.0, 1000.0),
+    vec!["platforms".to_string()],
+    (0.0, 0.0),
+    (1.0, 1.0),
+    0.0,
+);
+```
+
+### .as_platform()
+Makes the object solid - other objects will land on it and stop falling.
+```rust
+let ground = GameObject::new_rect(ctx, ...)
+    .as_platform();  // Now objects can stand on this
+```
+
+### .with_animation()
+Adds an AnimatedSprite to the GameObject.
+```rust
+let sprite = AnimatedSprite::new(
+    include_bytes!("../assets/walk.gif"),
+    (100.0, 100.0),
+    12.0
+)?;
+
+let animated_player = GameObject::new(ctx, ...)
+    .with_animation(sprite);
+```
+
+### object.visible
+Controls whether the object is drawn and participates in physics.
+```rust
+if let Some(obj) = canvas.get_game_object_mut("powerup") {
+    obj.visible = false;  // Hide it
+}
+```
+
+### object.position
+The (x, y) position of the object.
+```rust
+if let Some(obj) = canvas.get_game_object_mut("player") {
+    obj.position = (100.0, 200.0);  // Teleport
+}
+```
+
+### object.momentum
+The (vx, vy) velocity of the object. Position changes by momentum each frame.
+```rust
+if let Some(obj) = canvas.get_game_object_mut("player") {
+    obj.momentum = (10.0, 0.0);  // Move right at 10 units/frame
+}
+```
+
+### object.resistance
+Friction/drag applied each frame. Momentum is multiplied by this.
+```rust
+// High resistance = stops quickly
+obj.resistance = (0.8, 0.8);
+
+// Low resistance = slides forever
+obj.resistance = (0.99, 0.99);
+
+// No resistance = never stops
+obj.resistance = (1.0, 1.0);
+```
+
+### object.gravity
+Added to vertical momentum each frame. Positive = falls down.
+```rust
+object.set_gravity(1.2);  // Normal gravity
+object.set_gravity(0.0);  // No gravity (space!)
+object.set_gravity(-0.5); // Floats upward
+```
+
+### object.is_platform
+Whether other objects can land on this object.
+```rust
+if let Some(obj) = canvas.get_game_object_mut("ground") {
+    obj.is_platform = true;
+}
+```
+
+### object.size
+The (width, height) of the object in virtual coordinates.
+```rust
+let size = obj.size;  // (100.0, 100.0)
+```
+
+### object.id
+The unique identifier string.
+```rust
+let id = obj.id.clone();  // "player_id"
+```
+
+### object.tags
+List of tags for group targeting.
+```rust
+let tags = obj.tags.clone();  // vec!["player", "controllable"]
+```
+
+## AnimatedSprite
+
+GIF animations for GameObjects.
+
+### AnimatedSprite::new()
+Loads a GIF file and creates an animated sprite.
+```rust
+let sprite = AnimatedSprite::new(
+    include_bytes!("../assets/walk.gif"),  // GIF bytes
+    (50.0, 50.0),                          // Display size
+    12.0                                    // Frames per second
+)?;
+```
+
+### sprite.update()
+Updates animation (called automatically by Canvas each frame).
+```rust
+sprite.update(0.016);  // delta_time in seconds
+```
+
+### sprite.set_fps()
+Changes animation speed.
+```rust
+sprite.set_fps(24.0);  // Play at 24 FPS
+```
+
+### sprite.reset()
+Resets animation to first frame.
+```rust
+sprite.reset();
+```
+
+### sprite.set_frame()
+Jump to specific frame.
+```rust
+sprite.set_frame(5);  // Go to frame 5
+```
+
+### sprite.frame_count()
+Get total number of frames.
+```rust
+let count = sprite.frame_count();  // 32 frames
+```
+
+### sprite.get_current_image()
+Get the current frame as an Image.
+```rust
+let img = sprite.get_current_image();
+```
+
+## Actions
+
+Actions modify game state. Use with `canvas.run()` or in events.
+
+### Action::ApplyMomentum
+Adds to existing momentum (for jumps, boosts).
+```rust
+Action::ApplyMomentum {
+    target: Target::ById("player".to_string()),
+    value: (0.0, -10.0)  // Add upward velocity
+}
+
+// Usage:
+canvas.run(Action::ApplyMomentum {
+    target: Target::ById("player".to_string()),
+    value: (5.0, 0.0)  // Boost right
+});
+```
+
+### Action::SetMomentum
+Directly sets momentum (for stopping, movement changes).
+```rust
+Action::SetMomentum {
+    target: Target::ByTag("enemies".to_string()),
+    value: (0.0, 0.0)  // Stop all enemies
+}
+
+// Usage:
+canvas.run(Action::SetMomentum {
+    target: Target::ById("player".to_string()),
+    value: (10.0, 0.0)  // Move right
+});
+```
+
+### Action::SetResistance
+Changes friction/drag.
+```rust
+Action::SetResistance {
+    target: Target::ById("player".to_string()),
+    value: (0.99, 0.99)  // Ice physics - slides more
+}
+
+// Usage:
+canvas.run(Action::SetResistance {
+    target: Target::ById("player".to_string()),
+    value: (0.8, 0.8)  // Sticky ground - stops fast
+});
+```
+
+### Action::Remove
+Deletes objects from the game.
+```rust
+Action::Remove {
+    target: Target::ByTag("bullets".to_string())  // Remove all bullets
+}
+
+// Usage:
+canvas.run(Action::Remove {
+    target: Target::ById("enemy_1".to_string())
+});
+```
+
+### Action::Spawn
+Creates new objects at specified location.
+```rust
+Action::Spawn {
+    object: Box::new(new_enemy),
+    location: Location::Position((100.0, 200.0))
+}
+
+// Usage:
+let bullet = GameObject::new(ctx, "bullet".to_string(), ...);
+canvas.run(Action::Spawn {
+    object: Box::new(bullet),
+    location: Location::AtTarget(Box::new(Target::ById("player".to_string())))
+});
+```
+
+### Action::SetAnimation
+Changes the animation of an object.
+```rust
+Action::SetAnimation {
+    target: Target::ById("player".to_string()),
+    animation_bytes: include_bytes!("../assets/run.gif"),
+    fps: 16.0
+}
+
+// Usage:
+canvas.run(Action::SetAnimation {
+    target: Target::ById("player".to_string()),
+    animation_bytes: include_bytes!("../assets/idle.gif"),
+    fps: 8.0
+});
+```
+
+### Action::SetPosition / Teleport
+Moves object to location. Both do the same thing.
+```rust
+Action::Teleport {
+    target: Target::ById("player".to_string()),
+    location: Location::Position((0.0, 0.0))
+}
+
+// Usage:
+canvas.run(Action::Teleport {
+    target: Target::ById("player".to_string()),
+    location: Location::OnTarget {
+        target: Box::new(Target::ById("spawn_point".to_string())),
+        anchor: Anchor::Center,
+        offset: (0.0, 0.0)
+    }
+});
+```
+
+### Action::Show / Hide / Toggle
+Control visibility.
+```rust
+Action::Show { target: Target::ById("powerup".to_string()) }
+Action::Hide { target: Target::ById("enemy".to_string()) }
+Action::Toggle { target: Target::ById("door".to_string()) }
+
+// Usage:
+canvas.run(Action::Show {
+    target: Target::ByTag("collectibles".to_string())
+});
+```
+
+### Action::Conditional
+Execute different actions based on conditions.
+```rust
+Action::Conditional {
+    condition: Condition::IsVisible(Target::ById("key".to_string())),
+    if_true: Box::new(Action::Show {
+        target: Target::ById("door".to_string())
+    }),
+    if_false: Some(Box::new(Action::Hide {
+        target: Target::ById("door".to_string())
+    }))
+}
+
+// Usage:
+canvas.run(Action::Conditional {
+    condition: Condition::KeyHeld(Key::Character("shift".to_string().into())),
+    if_true: Box::new(Action::SetMomentum {
+        target: Target::ById("player".to_string()),
+        value: (20.0, 0.0)  // Sprint
+    }),
+    if_false: Some(Box::new(Action::SetMomentum {
+        target: Target::ById("player".to_string()),
+        value: (10.0, 0.0)  // Walk
+    }))
+});
+```
+
+### Action::TransferMomentum
+Transfer momentum from one object to another (averaged and scaled).
+```rust
+Action::TransferMomentum {
+    from: Target::ById("ball".to_string()),
+    to: Target::ById("player".to_string()),
+    scale: 0.5  // Transfer 50% of momentum
+}
+
+// Usage:
+canvas.run(Action::TransferMomentum {
+    from: Target::ById("explosion".to_string()),
+    to: Target::ByTag("debris".to_string()),
+    scale: 2.0  // 200% knockback
+});
+```
+
+## Targets
+
+Select which objects an action affects.
+
+### Target::ById
+Target single object by unique ID.
+```rust
+Target::ById("player".to_string())
+Target::ById("enemy_3".to_string())
+```
+
+### Target::ByTag
+Target all objects with a specific tag.
+```rust
+Target::ByTag("enemies".to_string())
+Target::ByTag("collectibles".to_string())
+```
+
+### Target::ByName
+Target object by the name used in `add_game_object()`.
+```rust
+Target::ByName("player".to_string())
+```
+
+## Locations
+
+Specify where to place objects.
+
+### Location::Position
+Absolute (x, y) coordinates.
+```rust
+Location::Position((100.0, 200.0))
+```
+
+### Location::AtTarget
+At another object's position.
+```rust
+Location::AtTarget(Box::new(Target::ById("player".to_string())))
+```
+
+### Location::Between
+Midpoint between two objects.
+```rust
+Location::Between(
+    Box::new(Target::ById("player".to_string())),
+    Box::new(Target::ById("enemy".to_string()))
+)
+```
+
+### Location::Relative
+Offset from another object.
+```rust
+Location::Relative {
+    target: Box::new(Target::ById("player".to_string())),
+    offset: (50.0, 0.0)  // 50 units to the right
+}
+```
+
+### Location::OnTarget
+Position relative to object using anchors.
+```rust
+Location::OnTarget {
+    target: Box::new(Target::ById("platform".to_string())),
+    anchor: Anchor::TopCenter,
+    offset: (0.0, -10.0)  // 10 units above center
+}
+```
+
+## Anchors
+
+Reference points on objects for positioning.
+```rust
+Anchor::TopLeft        // Top-left corner
+Anchor::TopCenter      // Top edge, centered
+Anchor::TopRight       // Top-right corner
+Anchor::CenterLeft     // Left edge, centered vertically
+Anchor::Center         // Center of object
+Anchor::CenterRight    // Right edge, centered vertically
+Anchor::BottomLeft     // Bottom-left corner
+Anchor::BottomCenter   // Bottom edge, centered
+Anchor::BottomRight    // Bottom-right corner
+
+// Custom anchor
+Anchor { x: 0.5, y: 0.5 }  // Center (0.0-1.0 range)
+Anchor { x: 0.25, y: 0.75 } // 25% from left, 75% from top
+```
+
+## Conditions
+
+Check game state before executing actions.
+
+### Condition::Always
+Always true.
+```rust
+Condition::Always
+```
+
+### Condition::KeyHeld
+True if key is currently pressed.
+```rust
+Condition::KeyHeld(Key::Character("w".to_string().into()))
+```
+
+### Condition::KeyNotHeld
+True if key is not pressed.
+```rust
+Condition::KeyNotHeld(Key::Character("space".to_string().into()))
+```
+
+### Condition::Collision
+True if target is colliding with any object.
+```rust
+Condition::Collision(Target::ById("player".to_string()))
+```
+
+### Condition::NoCollision
+True if target is not colliding.
+```rust
+Condition::NoCollision(Target::ById("player".to_string()))
+```
+
+### Condition::IsVisible
+True if target is visible.
+```rust
+Condition::IsVisible(Target::ById("powerup".to_string()))
+```
+
+### Condition::IsHidden
+True if target is hidden.
+```rust
+Condition::IsHidden(Target::ById("secret".to_string()))
+```
+
+### Condition::And
+Both conditions must be true.
+```rust
+Condition::And(
+    Box::new(Condition::KeyHeld(Key::Character("w".to_string().into()))),
+    Box::new(Condition::IsVisible(Target::ById("can_jump".to_string())))
+)
+```
+
+### Condition::Or
+At least one condition must be true.
+```rust
+Condition::Or(
+    Box::new(Condition::KeyHeld(Key::Character("a".to_string().into()))),
+    Box::new(Condition::KeyHeld(Key::Character("d".to_string().into())))
+)
+```
+
+### Condition::Not
+Inverts the condition.
+```rust
+Condition::Not(
+    Box::new(Condition::Collision(Target::ById("wall".to_string())))
+)
+```
+
+## Events
+
+Automatically trigger actions when events occur.
+
+### GameEvent::KeyPress
+Triggers once when key is first pressed.
+```rust
+GameEvent::KeyPress {
+    key: Key::Character("w".to_string().into()),
+    action: Action::ApplyMomentum {
+        target: Target::ById("player".to_string()),
+        value: (0.0, -15.0)
+    },
+    target: Target::ById("player".to_string())
+}
+
+// Add to canvas:
+canvas.add_event(event, Target::ById("player".to_string()));
+```
+
+### GameEvent::KeyRelease
+Triggers once when key is released.
+```rust
+GameEvent::KeyRelease {
+    key: Key::Character("d".to_string().into()),
+    action: Action::SetMomentum {
+        target: Target::ById("player".to_string()),
+        value: (0.0, 0.0)  // Stop moving
+    },
+    target: Target::ById("player".to_string())
+}
+```
+
+### GameEvent::KeyHold
+Triggers continuously while key is held down (every frame).
+```rust
+GameEvent::KeyHold {
+    key: Key::Character("d".to_string().into()),
+    action: Action::SetMomentum {
+        target: Target::ById("player".to_string()),
+        value: (10.0, 0.0)  // Keep moving right
+    },
+    target: Target::ById("player".to_string())
+}
+```
+
+### GameEvent::Collision
+Triggers when object collides with any other object.
+```rust
+GameEvent::Collision {
+    action: Action::Remove {
+        target: Target::ById("bullet".to_string())
+    },
+    target: Target::ById("bullet".to_string())
+}
+```
+
+### GameEvent::BoundaryCollision
+Triggers when object hits canvas edges.
+```rust
+GameEvent::BoundaryCollision {
+    action: Action::SetMomentum {
+        target: Target::ById("ball".to_string()),
+        value: (0.0, 0.0)
+    },
+    target: Target::ById("ball".to_string())
+}
+```
+
+### GameEvent::Tick
+Triggers every frame (~60 FPS).
+```rust
+GameEvent::Tick {
+    action: Action::ApplyMomentum {
+        target: Target::ById("enemy".to_string()),
+        value: (0.1, 0.0)  // Slowly move right
+    },
+    target: Target::ById("enemy".to_string())
+}
+```
+
+### GameEvent::Custom
+Trigger custom named events.
+```rust
+GameEvent::Custom {
+    name: "level_complete".to_string(),
+    target: Target::ById("player".to_string())
+}
+
+// Trigger manually:
+canvas.trigger_custom_event("level_complete");
+```
+
+## Keys
+
+Common keyboard keys for input.
+```rust
+Key::Character("w".to_string().into())
+Key::Character("a".to_string().into())
+Key::Character("s".to_string().into())
+Key::Character("d".to_string().into())
+Key::Character("space".to_string().into())
+Key::ArrowUp
+Key::ArrowDown
+Key::ArrowLeft
+Key::ArrowRight
+Key::Enter
+Key::Escape
+Key::Shift
+Key::Control
+```
+
+## Physics
+
+The engine automatically handles physics every frame:
+
+1. **Gravity**: `object.momentum.1 += object.gravity`
+2. **Position**: `object.position += object.momentum`
+3. **Resistance**: `object.momentum *= object.resistance`
+4. **Platform Collision**: Objects land on `.as_platform()` objects
+5. **Object Collision**: Automatic detection between all objects
+6. **Boundary Collision**: Detection when hitting canvas edges
+
+### Physics Tips
+```rust
+// Good platformer settings
+gravity: 1.2
+resistance: (0.98, 0.98)
+
+// Ice physics (slides a lot)
+resistance: (0.99, 0.99)
+
+// Sticky ground (stops fast)
+resistance: (0.8, 0.8)
+
+// No friction
+resistance: (1.0, 1.0)
+
+// Instant stop
+resistance: (0.0, 0.0)
+
+// Movement directions
+(+x, +y) = right, down
+(-x, -y) = left, up
+```
+
+## Complete Example
+```rust
+use quartz::*;
 use ramp::prism;
 use prism::drawable::Drawable;
 
@@ -297,81 +844,40 @@ pub struct MyApp;
 
 impl MyApp {
     fn new(ctx: &mut Context) -> impl Drawable {
-        let canvas_mode = CanvasMode::Landscape;
-        let virtual_size = (3840.0, 2160.0);
+        let mut canvas = Canvas::new(ctx, CanvasMode::Landscape);
         
-        let player_size = 100.0;
-        let ground_level = virtual_size.1 - 200.0;
-        
-        // Create green player block
-        let player_image = Image {
-            shape: ShapeType::Rectangle(0.0, (player_size, player_size), 0.0),
+        // Create player
+        let player_img = Image {
+            shape: ShapeType::Rectangle(0.0, (100.0, 100.0), 0.0),
             image: image::RgbaImage::from_pixel(1, 1, 
                 image::Rgba([0, 255, 0, 255])).into(),
             color: None
         };
         
+        let player = GameObject::new(
+            ctx, "player".to_string(), player_img, 100.0,
+            (500.0, 1000.0), vec!["player".to_string()],
+            (0.0, 0.0), (0.98, 0.98), 1.2
+        );
+        canvas.add_game_object("player".to_string(), player);
+        
         // Create ground platform
-        let ground_image = Image {
-            shape: ShapeType::Rectangle(0.0, (virtual_size.0, 50.0), 0.0),
+        let ground_img = Image {
+            shape: ShapeType::Rectangle(0.0, (3840.0, 50.0), 0.0),
             image: image::RgbaImage::from_pixel(1, 1, 
                 image::Rgba([100, 100, 100, 255])).into(),
             color: None
         };
         
-        // Create power indicator (red = off, green = on)
-        let indicator_image = Image {
-            shape: ShapeType::Rectangle(0.0, (50.0, 50.0), 0.0),
-            image: image::RgbaImage::from_pixel(1, 1, 
-                image::Rgba([255, 0, 0, 255])).into(),
-            color: None
-        };
-        
-        let mut canvas = Canvas::new(ctx, canvas_mode);
-        
-        // Add ground platform
         let ground = GameObject::new_rect(
-            ctx,
-            "ground".to_string(),
-            ground_image,
-            (virtual_size.0, 50.0),
-            (0.0, ground_level),
+            ctx, "ground".to_string(), ground_img,
+            (3840.0, 50.0), (0.0, 2000.0),
             vec!["ground".to_string()],
-            (0.0, 0.0),
-            (1.0, 1.0),
-            0.0,
-        ).as_platform();  // Make it a platform
+            (0.0, 0.0), (1.0, 1.0), 0.0
+        ).as_platform();
         canvas.add_game_object("ground".to_string(), ground);
         
-        // Add player
-        let player = GameObject::new(
-            ctx,
-            "player".to_string(),
-            player_image,
-            player_size,
-            (400.0, ground_level - player_size),
-            vec!["player".to_string()],
-            (0.0, 0.0),
-            (0.98, 0.98),
-            1.2,  // Gravity
-        );
-        canvas.add_game_object("player".to_string(), player);
-        
-        // Add power indicator
-        let indicator = GameObject::new(
-            ctx,
-            "power_indicator".to_string(),
-            indicator_image,
-            50.0,
-            (100.0, 100.0),
-            vec!["indicator".to_string()],
-            (0.0, 0.0),
-            (1.0, 1.0),
-            0.0,
-        );
-        canvas.add_game_object("power_indicator".to_string(), indicator);
-        
-        // Jump on 'W' key
+        // Jump on W press
         canvas.add_event(
             GameEvent::KeyPress {
                 key: Key::Character("w".to_string().into()),
@@ -384,29 +890,23 @@ impl MyApp {
             Target::ById("player".to_string())
         );
         
-        // Move left on 'A' key (only if power indicator visible)
+        // Move right while D is held
         canvas.add_event(
-            GameEvent::KeyPress {
-                key: Key::Character("a".to_string().into()),
-                action: Action::Conditional {
-                    condition: Condition::IsVisible(
-                        Target::ById("power_indicator".to_string())
-                    ),
-                    if_true: Box::new(Action::SetMomentum {
-                        target: Target::ById("player".to_string()),
-                        value: (-15.0, 0.0)
-                    }),
-                    if_false: None
+            GameEvent::KeyHold {
+                key: Key::Character("d".to_string().into()),
+                action: Action::SetMomentum {
+                    target: Target::ById("player".to_string()),
+                    value: (10.0, 0.0)
                 },
                 target: Target::ById("player".to_string())
             },
             Target::ById("player".to_string())
         );
         
-        // Stop horizontal movement on 'A' release
+        // Stop on D release
         canvas.add_event(
             GameEvent::KeyRelease {
-                key: Key::Character("a".to_string().into()),
+                key: Key::Character("d".to_string().into()),
                 action: Action::SetMomentum {
                     target: Target::ById("player".to_string()),
                     value: (0.0, 0.0)
@@ -416,12 +916,26 @@ impl MyApp {
             Target::ById("player".to_string())
         );
         
-        // Toggle power indicator with 'P' key
+        // Move left while A is held
         canvas.add_event(
-            GameEvent::KeyPress {
-                key: Key::Character("p".to_string().into()),
-                action: Action::Toggle {
-                    target: Target::ById("power_indicator".to_string())
+            GameEvent::KeyHold {
+                key: Key::Character("a".to_string().into()),
+                action: Action::SetMomentum {
+                    target: Target::ById("player".to_string()),
+                    value: (-10.0, 0.0)
+                },
+                target: Target::ById("player".to_string())
+            },
+            Target::ById("player".to_string())
+        );
+        
+        // Stop on A release
+        canvas.add_event(
+            GameEvent::KeyRelease {
+                key: Key::Character("a".to_string().into()),
+                action: Action::SetMomentum {
+                    target: Target::ById("player".to_string()),
+                    value: (0.0, 0.0)
                 },
                 target: Target::ById("player".to_string())
             },
@@ -437,169 +951,6 @@ ramp::run!{|ctx: &mut Context| {
 }}
 ```
 
-## API Reference
-
-### Canvas Methods
-```rust
-// Create a new canvas
-Canvas::new(ctx: &mut Context, mode: CanvasMode) -> Self
-
-// Add a game object
-canvas.add_game_object(name: String, object: GameObject)
-
-// Remove a game object
-canvas.remove_game_object(name: &str)
-
-// Get object reference
-canvas.get_game_object(name: &str) -> Option<&GameObject>
-canvas.get_game_object_mut(name: &str) -> Option<&mut GameObject>
-
-// Add event handler
-canvas.add_event(event: GameEvent, target: Target)
-
-// Execute an action
-canvas.run(action: Action)
-
-// Custom per-frame logic
-canvas.on_tick<F>(callback: F) where F: FnMut(&mut Canvas) + 'static
-
-// Check collision between targets
-canvas.collision_between(target1: &Target, target2: &Target) -> bool
-
-// Get canvas info
-canvas.get_virtual_size() -> (f32, f32)
-canvas.get_scale() -> f32
-canvas.get_mode() -> CanvasMode
-```
-
-### GameObject Methods
-```rust
-// Create square GameObject
-GameObject::new(
-    ctx: &mut Context,
-    id: String,
-    image: Image,
-    size: f32,
-    position: (f32, f32),
-    tags: Vec<String>,
-    momentum: (f32, f32),
-    resistance: (f32, f32),
-    gravity: f32
-) -> Self
-
-// Create rectangular GameObject
-GameObject::new_rect(
-    ctx: &mut Context,
-    id: String,
-    image: Image,
-    size: (f32, f32),
-    position: (f32, f32),
-    tags: Vec<String>,
-    momentum: (f32, f32),
-    resistance: (f32, f32),
-    gravity: f32
-) -> Self
-
-// Make object a platform
-object.as_platform() -> Self
-
-// Add animation
-object.with_animation(sprite: AnimatedSprite) -> Self
-
-// Visibility control
-object.visible = true/false
-
-// Modify properties
-object.set_gravity(gravity: f32)
-```
-
-### AnimatedSprite Methods
-```rust
-// Create from GIF bytes
-AnimatedSprite::new(gif_bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String>
-
-// Control animation
-sprite.update(delta_time: f32)
-sprite.set_fps(fps: f32)
-sprite.reset()
-sprite.set_frame(frame: usize)
-sprite.frame_count() -> usize
-sprite.get_current_image() -> Image
-```
-
-### Location Types
-```rust
-Location::Position((x, y))                              // Absolute position
-Location::AtTarget(Box::new(target))                    // At target's position
-Location::Between(Box::new(target1), Box::new(target2)) // Midpoint between targets
-Location::OnTarget {                                    // Relative to target with anchor
-    target: Box::new(target),
-    anchor: Anchor::BottomRight,
-    offset: (x, y)
-}
-```
-
-### Condition Types
-```rust
-Condition::IsVisible(target)  // Check if target is visible
-```
-
-### Anchor Types
-```rust
-Anchor::TopLeft       // Top-left corner
-Anchor::TopCenter     // Top edge, centered
-Anchor::TopRight      // Top-right corner
-Anchor::CenterLeft    // Left edge, vertically centered
-Anchor::Center        // Center of object
-Anchor::CenterRight   // Right edge, vertically centered
-Anchor::BottomLeft    // Bottom-left corner
-Anchor::BottomCenter  // Bottom edge, centered
-Anchor::BottomRight   // Bottom-right corner
-```
-
-## How It Works
-
-### Automatic Update Loop
-
-Every frame (approximately 60 FPS), the Canvas automatically:
-
-1. Runs custom `on_tick` callbacks
-2. Updates all animated sprites
-3. Applies gravity to momentum
-4. Updates positions based on momentum
-5. Applies resistance (friction/drag)
-6. Checks for platform collisions and stops falling objects
-7. Checks for collisions between all objects
-8. Checks for boundary collisions
-9. Triggers appropriate event handlers
-
-### Coordinate System
-
-- Origin (0, 0) is top-left
-- X increases to the right
-- Y increases downward
-- Virtual coordinates scale automatically to actual screen size
-
-
-## Architecture
-```
-Canvas (Game World)
-  ├── CanvasLayout (Handles scaling and positioning)
-  ├── GameObjects (Entities with physics and visuals)
-  │     ├── Image (Static or from AnimatedSprite)
-  │     ├── Physics (momentum, resistance, gravity)
-  │     ├── Platform flag (solid for other objects)
-  │     ├── Visibility flag
-  │     └── Identity (id, tags)
-  ├── Event System (Links triggers to actions)
-  ├── Condition System (Checks state before actions)
-  └── Tick Callbacks (Custom per-frame logic)
-```
-
-## License
-
-Built on top of the Prism framework. Check your Prism license for usage terms.
-
 ---
 
-**Created with ❤️ using Rust**
+Built with Rust 🦀

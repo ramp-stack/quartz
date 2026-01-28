@@ -107,7 +107,6 @@ pub enum Action {
     },
 }
 
-#[derive(Debug, Clone)]
 pub enum GameEvent {
     Collision {
         action: Action,
@@ -136,6 +135,93 @@ pub enum GameEvent {
         action: Action,
         target: Target,
     },
+    Custom {
+        name: String,
+        target: Target,
+    },
+}
+
+impl Clone for GameEvent {
+    fn clone(&self) -> Self {
+        match self {
+            GameEvent::Collision { action, target } => GameEvent::Collision {
+                action: action.clone(),
+                target: target.clone(),
+            },
+            GameEvent::BoundaryCollision { action, target } => GameEvent::BoundaryCollision {
+                action: action.clone(),
+                target: target.clone(),
+            },
+            GameEvent::KeyPress { key, action, target } => GameEvent::KeyPress {
+                key: key.clone(),
+                action: action.clone(),
+                target: target.clone(),
+            },
+            GameEvent::KeyRelease { key, action, target } => GameEvent::KeyRelease {
+                key: key.clone(),
+                action: action.clone(),
+                target: target.clone(),
+            },
+            GameEvent::KeyHold { key, action, target } => GameEvent::KeyHold {
+                key: key.clone(),
+                action: action.clone(),
+                target: target.clone(),
+            },
+            GameEvent::Tick { action, target } => GameEvent::Tick {
+                action: action.clone(),
+                target: target.clone(),
+            },
+            GameEvent::Custom { name, target } => GameEvent::Custom {
+                name: name.clone(),
+                target: target.clone(),
+            },
+        }
+    }
+}
+
+impl std::fmt::Debug for GameEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GameEvent::Collision { action, target } => f
+                .debug_struct("Collision")
+                .field("action", action)
+                .field("target", target)
+                .finish(),
+            GameEvent::BoundaryCollision { action, target } => f
+                .debug_struct("BoundaryCollision")
+                .field("action", action)
+                .field("target", target)
+                .finish(),
+            GameEvent::KeyPress { key, action, target } => f
+                .debug_struct("KeyPress")
+                .field("key", key)
+                .field("action", action)
+                .field("target", target)
+                .finish(),
+            GameEvent::KeyRelease { key, action, target } => f
+                .debug_struct("KeyRelease")
+                .field("key", key)
+                .field("action", action)
+                .field("target", target)
+                .finish(),
+            GameEvent::KeyHold { key, action, target } => f
+                .debug_struct("KeyHold")
+                .field("key", key)
+                .field("action", action)
+                .field("target", target)
+                .finish(),
+            GameEvent::Tick { action, target } => f
+                .debug_struct("Tick")
+                .field("action", action)
+                .field("target", target)
+                .finish(),
+            GameEvent::Custom { name, target } => f
+                .debug_struct("Custom")
+                .field("name", name)
+                .field("target", target)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
