@@ -619,17 +619,6 @@ Location::OnTarget {
 
 Reference points on objects for positioning.
 ```rust
-Anchor::TopLeft        // Top-left corner
-Anchor::TopCenter      // Top edge, centered
-Anchor::TopRight       // Top-right corner
-Anchor::CenterLeft     // Left edge, centered vertically
-Anchor::Center         // Center of object
-Anchor::CenterRight    // Right edge, centered vertically
-Anchor::BottomLeft     // Bottom-left corner
-Anchor::BottomCenter   // Bottom edge, centered
-Anchor::BottomRight    // Bottom-right corner
-
-// Custom anchor
 Anchor { x: 0.5, y: 0.5 }  // Center (0.0-1.0 range)
 Anchor { x: 0.25, y: 0.75 } // 25% from left, 75% from top
 ```
@@ -788,15 +777,51 @@ GameEvent::Tick {
 ```
 
 ### GameEvent::Custom
-Trigger custom named events.
+Trigger custom named events with your own logic.
 ```rust
-GameEvent::Custom {
-    name: "level_complete".to_string(),
-    target: Target::ById("player".to_string())
-}
+// Define a custom event
+canvas.add_event(
+    GameEvent::Custom {
+        name: "spawn_wave".to_string(),
+        target: Target::ById("game_manager".to_string())
+    },
+    Target::ById("game_manager".to_string())
+);
 
-// Trigger manually:
-canvas.trigger_custom_event("level_complete");
+// Set up custom event handler with your own code
+canvas.on_custom("spawn_wave", |canvas| {
+    // Your custom logic here - anything you want!
+    for i in 0..5 {
+        let x = 100.0 + (i as f32 * 200.0);
+        let y = (i as f32 * 50.0).sin() * 100.0 + 500.0;  // Wave pattern
+        
+        canvas.run(Action::Spawn {
+            object: Box::new(create_enemy(x, y)),
+            location: Location::Position((x, y))
+        });
+    }
+    
+    // Do math, check conditions, spawn objects, etc.
+    let total_enemies = canvas.get_target_indices(&Target::ByTag("enemies".to_string())).len();
+    if total_enemies > 10 {
+        canvas.run(Action::Remove {
+            target: Target::ByTag("powerups".to_string())
+        });
+    }
+});
+
+// Trigger it anywhere
+canvas.trigger_custom_event("spawn_wave");
+
+// Example: Timer-based custom event
+let mut timer = 0;
+canvas.on_tick(move |canvas| {
+    timer += 1;
+    if timer >= 180 {  // Every 3 seconds
+        timer = 0;
+        canvas.trigger_custom_event("spawn_wave");
+    }
+});
 ```
 
 ## Keys
@@ -807,15 +832,7 @@ Key::Character("w".to_string().into())
 Key::Character("a".to_string().into())
 Key::Character("s".to_string().into())
 Key::Character("d".to_string().into())
-Key::Character("space".to_string().into())
-Key::ArrowUp
-Key::ArrowDown
-Key::ArrowLeft
-Key::ArrowRight
-Key::Enter
-Key::Escape
-Key::Shift
-Key::Control
+Key::Character(" ".to_string().into()) //Spacebar input is just empty space
 ```
 
 ## Physics
@@ -829,28 +846,6 @@ The engine automatically handles physics every frame:
 5. **Object Collision**: Automatic detection between all objects
 6. **Boundary Collision**: Detection when hitting canvas edges
 
-### Physics Tips
-```rust
-// Good platformer settings
-gravity: 1.2
-resistance: (0.98, 0.98)
-
-// Ice physics (slides a lot)
-resistance: (0.99, 0.99)
-
-// Sticky ground (stops fast)
-resistance: (0.8, 0.8)
-
-// No friction
-resistance: (1.0, 1.0)
-
-// Instant stop
-resistance: (0.0, 0.0)
-
-// Movement directions
-(+x, +y) = right, down
-(-x, -y) = left, up
-```
 
 ## Complete Example
 ```rust
