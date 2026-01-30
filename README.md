@@ -176,11 +176,7 @@ Enables infinite scrolling for objects with a specific tag. When objects move of
 - `direction: ScrollDirection` - Direction (`Left`, `Right`, `Up`, `Down`)
 - `tag: &str` - Tag name for objects that should scroll (use any name)
 
-**Example:**
 ```rust
-// Load background image
-let bg_image = Image::from_file(ctx, "background.png").unwrap();
-
 // Create two background tiles for seamless scrolling
 let bg1 = GameObject::new_rect(
     ctx, "bg1".to_string(), bg_image.clone(),
