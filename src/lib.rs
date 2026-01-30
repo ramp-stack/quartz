@@ -296,7 +296,6 @@ impl OnEvent for Canvas {
     }
 }
 
-// Private helper methods
 impl Canvas {
     fn check_collision(&self, idx1: usize, idx2: usize) -> bool {
         let obj1 = match self.objects.get(idx1) {
@@ -482,3 +481,5 @@ impl Location {
         }
     }
 }
+
+

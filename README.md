@@ -169,8 +169,13 @@ if canvas.is_key_held(&Key::Character("w".to_string().into())) {
 }
 ```
 
-### canvas.handle_infinite_scroll()
-Automatically repositions objects tagged with "scroll" for infinite scrolling backgrounds. Called automatically each frame.
+### canvas.handle_infinite_scroll(direction)
+Automatically repositions objects tagged with "scroll" for infinite scrolling backgrounds in the specified direction.
+
+**Parameters:**
+- `direction: ScrollDirection` - The scroll direction (`ScrollDirection::Left`, `ScrollDirection::Right`, `ScrollDirection::Up`, or `ScrollDirection::Down`)
+
+**Usage:**
 ```rust
 // Tag background objects with "scroll"
 let bg1 = GameObject::new_rect(
@@ -179,7 +184,20 @@ let bg1 = GameObject::new_rect(
     vec!["scroll".to_string()],  // This tag enables auto-scrolling
     (-5.0, 0.0), (1.0, 1.0), 0.0
 );
+
+// Call in your game loop with desired direction
+canvas.handle_infinite_scroll(ScrollDirection::Left);   // Scroll left (horizontal)
+canvas.handle_infinite_scroll(ScrollDirection::Right);  // Scroll right (horizontal)
+canvas.handle_infinite_scroll(ScrollDirection::Up);     // Scroll up (vertical)
+canvas.handle_infinite_scroll(ScrollDirection::Down);   // Scroll down (vertical)
 ```
+
+**How it works:**
+- Requires at least 2 objects tagged with "scroll"
+- **Left**: When an object's right edge exits the screen, it wraps to the right of the rightmost object
+- **Right**: When an object's left edge exceeds canvas width, it wraps to the left of the leftmost object
+- **Up**: When an object's bottom edge exits the screen, it wraps to the bottom of the bottommost object
+- **Down**: When an object's top edge exceeds canvas height, it wraps to the top of the topmost object
 
 ## GameObject
 

@@ -1,5 +1,14 @@
 use super::*;
 
+// Add this enum definition at the top of your module or in a separate types file
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 impl Canvas {
     pub fn new(_ctx: &mut Context, mode: CanvasMode) -> Self {
         let virtual_res = mode.virtual_resolution();
@@ -305,33 +314,117 @@ impl Canvas {
         false
     }
     
-    pub fn handle_infinite_scroll(&mut self) {
+    pub fn handle_infinite_scroll(&mut self, direction: ScrollDirection) {
         let bg_indices = self.get_target_indices(&Target::ByTag("scroll".to_string()));
         
         if bg_indices.len() < 2 {
             return; 
         }
         
-        for &idx in &bg_indices {
-            if let Some(obj) = self.objects.get(idx) {
-                let right_edge = obj.position.0 + obj.size.0;
-                
-                if right_edge <= -10.0 {
-                    let mut max_right_edge = f32::MIN;
-                    for &other_idx in &bg_indices {
-                        if other_idx != idx {
-                            if let Some(other_obj) = self.objects.get(other_idx) {
-                                let other_right = other_obj.position.0 + other_obj.size.0;
-                                if other_right > max_right_edge {
-                                    max_right_edge = other_right;
+        match direction {
+            ScrollDirection::Left => {
+                for &idx in &bg_indices {
+                    if let Some(obj) = self.objects.get(idx) {
+                        let right_edge = obj.position.0 + obj.size.0;
+                        
+                        if right_edge <= -10.0 {
+                            let mut max_right_edge = f32::MIN;
+                            for &other_idx in &bg_indices {
+                                if other_idx != idx {
+                                    if let Some(other_obj) = self.objects.get(other_idx) {
+                                        let other_right = other_obj.position.0 + other_obj.size.0;
+                                        if other_right > max_right_edge {
+                                            max_right_edge = other_right;
+                                        }
+                                    }
                                 }
+                            }
+                            
+                            if let Some(obj) = self.objects.get_mut(idx) {
+                                obj.position.0 = max_right_edge;
+                                self.layout.offsets[idx] = obj.position;
                             }
                         }
                     }
-                    
-                    if let Some(obj) = self.objects.get_mut(idx) {
-                        obj.position.0 = max_right_edge;
-                        self.layout.offsets[idx] = obj.position;
+                }
+            }
+            ScrollDirection::Right => {
+                for &idx in &bg_indices {
+                    if let Some(obj) = self.objects.get(idx) {
+                        let left_edge = obj.position.0;
+                        let canvas_width = self.layout.canvas_size.get().0;
+                        
+                        if left_edge >= canvas_width + 10.0 {
+                            let mut min_left_edge = f32::MAX;
+                            for &other_idx in &bg_indices {
+                                if other_idx != idx {
+                                    if let Some(other_obj) = self.objects.get(other_idx) {
+                                        let other_left = other_obj.position.0;
+                                        if other_left < min_left_edge {
+                                            min_left_edge = other_left;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if let Some(obj) = self.objects.get_mut(idx) {
+                                obj.position.0 = min_left_edge - obj.size.0;
+                                self.layout.offsets[idx] = obj.position;
+                            }
+                        }
+                    }
+                }
+            }
+            ScrollDirection::Up => {
+                for &idx in &bg_indices {
+                    if let Some(obj) = self.objects.get(idx) {
+                        let bottom_edge = obj.position.1 + obj.size.1;
+                        
+                        if bottom_edge <= -10.0 {
+                            let mut max_bottom_edge = f32::MIN;
+                            for &other_idx in &bg_indices {
+                                if other_idx != idx {
+                                    if let Some(other_obj) = self.objects.get(other_idx) {
+                                        let other_bottom = other_obj.position.1 + other_obj.size.1;
+                                        if other_bottom > max_bottom_edge {
+                                            max_bottom_edge = other_bottom;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if let Some(obj) = self.objects.get_mut(idx) {
+                                obj.position.1 = max_bottom_edge;
+                                self.layout.offsets[idx] = obj.position;
+                            }
+                        }
+                    }
+                }
+            }
+            ScrollDirection::Down => {
+                for &idx in &bg_indices {
+                    if let Some(obj) = self.objects.get(idx) {
+                        let top_edge = obj.position.1;
+                        let canvas_height = self.layout.canvas_size.get().1;
+                        
+                        if top_edge >= canvas_height + 10.0 {
+                            let mut min_top_edge = f32::MAX;
+                            for &other_idx in &bg_indices {
+                                if other_idx != idx {
+                                    if let Some(other_obj) = self.objects.get(other_idx) {
+                                        let other_top = other_obj.position.1;
+                                        if other_top < min_top_edge {
+                                            min_top_edge = other_top;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if let Some(obj) = self.objects.get_mut(idx) {
+                                obj.position.1 = min_top_edge - obj.size.1;
+                                self.layout.offsets[idx] = obj.position;
+                            }
+                        }
                     }
                 }
             }
