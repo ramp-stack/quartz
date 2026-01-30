@@ -169,35 +169,50 @@ if canvas.is_key_held(&Key::Character("w".to_string().into())) {
 }
 ```
 
-### canvas.handle_infinite_scroll(direction)
-Automatically repositions objects tagged with "scroll" for infinite scrolling backgrounds in the specified direction.
+### canvas.handle_infinite_scroll(direction, tag)
+Enables infinite scrolling for objects with a specific tag. When objects move off-screen, they wrap around to create a seamless loop.
 
 **Parameters:**
-- `direction: ScrollDirection` - The scroll direction (`ScrollDirection::Left`, `ScrollDirection::Right`, `ScrollDirection::Up`, or `ScrollDirection::Down`)
+- `direction: ScrollDirection` - Direction (`Left`, `Right`, `Up`, `Down`)
+- `tag: &str` - Tag name for objects that should scroll (use any name)
 
-**Usage:**
+**Example:**
 ```rust
-// Tag background objects with "scroll"
+// Load background image
+let bg_image = Image::from_file(ctx, "background.png").unwrap();
+
+// Create two background tiles for seamless scrolling
 let bg1 = GameObject::new_rect(
-    ctx, "bg1".to_string(), bg_image,
-    (3840.0, 2160.0), (0.0, 0.0),
-    vec!["scroll".to_string()],  // This tag enables auto-scrolling
-    (-5.0, 0.0), (1.0, 1.0), 0.0
+    ctx, "bg1".to_string(), bg_image.clone(),
+    (3840.0, 2160.0),               // Size
+    (0.0, 0.0),                     // Position - starts at left
+    vec!["background".to_string()], // Tag
+    (-5.0, 0.0),                    // Momentum - moves left
+    (1.0, 1.0), 0.0
 );
 
-// Call in your game loop with desired direction
-canvas.handle_infinite_scroll(ScrollDirection::Left);   // Scroll left (horizontal)
-canvas.handle_infinite_scroll(ScrollDirection::Right);  // Scroll right (horizontal)
-canvas.handle_infinite_scroll(ScrollDirection::Up);     // Scroll up (vertical)
-canvas.handle_infinite_scroll(ScrollDirection::Down);   // Scroll down (vertical)
+let bg2 = GameObject::new_rect(
+    ctx, "bg2".to_string(), bg_image.clone(),
+    (3840.0, 2160.0),               // Size
+    (3840.0, 0.0),                  // Position - right after bg1
+    vec!["background".to_string()], // Same tag
+    (-5.0, 0.0),                    // Same momentum
+    (1.0, 1.0), 0.0
+);
+
+canvas.add_game_object("bg1".to_string(), bg1);
+canvas.add_game_object("bg2".to_string(), bg2);
+
+// Scrolling happens automatically based on momentum!
+// Or call manually:
+canvas.handle_infinite_scroll(ScrollDirection::Left, "background");
 ```
 
-**How it works:**
-- Requires at least 2 objects tagged with "scroll"
-- **Left**: When an object's right edge exits the screen, it wraps to the right of the rightmost object
-- **Right**: When an object's left edge exceeds canvas width, it wraps to the left of the leftmost object
-- **Up**: When an object's bottom edge exits the screen, it wraps to the bottom of the bottommost object
-- **Down**: When an object's top edge exceeds canvas height, it wraps to the top of the topmost object
+**Requirements:**
+- At least 2 objects with the same tag
+- Objects wrap when they move ~10px off-screen
+
+
 
 ## GameObject
 

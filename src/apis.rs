@@ -314,8 +314,8 @@ impl Canvas {
         false
     }
     
-    pub fn handle_infinite_scroll(&mut self, direction: ScrollDirection) {
-        let bg_indices = self.get_target_indices(&Target::ByTag("scroll".to_string()));
+    pub fn handle_infinite_scroll(&mut self, direction: ScrollDirection, tag: &str) {
+        let bg_indices = self.get_target_indices(&Target::ByTag(tag.to_string()));
         
         if bg_indices.len() < 2 {
             return; 

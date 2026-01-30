@@ -16,6 +16,7 @@ mod apis;
 
 pub use game_object::{GameObject, Action, Target, Location, GameEvent, Condition, Anchor};
 pub use animation::AnimatedSprite;
+pub use apis::ScrollDirection;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
@@ -229,7 +230,50 @@ impl OnEvent for Canvas {
                 }
             }
             
-            self.handle_infinite_scroll();
+            // Handle infinite scroll for all tags
+            // Get all unique tags from all objects
+            let all_tags: HashSet<String> = self.tag_to_indices.keys().cloned().collect();
+            
+            for tag in all_tags {
+                let tag_indices = self.get_target_indices(&Target::ByTag(tag.clone()));
+                
+                if tag_indices.len() < 2 {
+                    continue;
+                }
+                
+                // Calculate average momentum for this tag group
+                let mut total_momentum_x = 0.0;
+                let mut total_momentum_y = 0.0;
+                let mut count = 0;
+                
+                for &idx in &tag_indices {
+                    if let Some(obj) = self.objects.get(idx) {
+                        total_momentum_x += obj.momentum.0;
+                        total_momentum_y += obj.momentum.1;
+                        count += 1;
+                    }
+                }
+                
+                if count > 0 {
+                    let avg_momentum_x = total_momentum_x / count as f32;
+                    let avg_momentum_y = total_momentum_y / count as f32;
+                    
+                    // Determine dominant direction based on momentum
+                    if avg_momentum_x.abs() > avg_momentum_y.abs() && avg_momentum_x.abs() > 0.1 {
+                        if avg_momentum_x < 0.0 {
+                            self.handle_infinite_scroll(ScrollDirection::Left, &tag);
+                        } else {
+                            self.handle_infinite_scroll(ScrollDirection::Right, &tag);
+                        }
+                    } else if avg_momentum_y.abs() > 0.1 {
+                        if avg_momentum_y < 0.0 {
+                            self.handle_infinite_scroll(ScrollDirection::Up, &tag);
+                        } else {
+                            self.handle_infinite_scroll(ScrollDirection::Down, &tag);
+                        }
+                    }
+                }
+            }
             
             for i in 0..self.objects.len() {
                 for j in 0..self.objects.len() {
@@ -481,5 +525,3 @@ impl Location {
         }
     }
 }
-
-
