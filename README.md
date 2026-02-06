@@ -169,29 +169,29 @@ if canvas.is_key_held(&Key::Character("w".to_string().into())) {
 }
 ```
 
-### canvas.handle_infinite_scroll(direction, tag)
-Enables infinite scrolling for objects with a specific tag. When objects move off-screen, they wrap around to create a seamless loop.
+### canvas.handle_infinite_scroll()
+Enables infinite scrolling for objects with the "scroll" tag. When objects move off-screen to the left, they wrap around to create a seamless loop.
 
-**Parameters:**
-- `direction: ScrollDirection` - Direction (`Left`, `Right`, `Up`, `Down`)
-- `tag: &str` - Tag name for objects that should scroll (use any name)
-
+**Example:**
 ```rust
+// Load background image
+let bg_image = Image::from_file(ctx, "background.png").unwrap();
+
 // Create two background tiles for seamless scrolling
 let bg1 = GameObject::new_rect(
-    ctx, "bg1".to_string(), bg_image.clone(),
+    ctx, "bg1".to_string(), Some(bg_image.clone()),
     (3840.0, 2160.0),               // Size
     (0.0, 0.0),                     // Position - starts at left
-    vec!["background".to_string()], // Tag
+    vec!["scroll".to_string()],     // MUST use "scroll" tag
     (-5.0, 0.0),                    // Momentum - moves left
     (1.0, 1.0), 0.0
 );
 
 let bg2 = GameObject::new_rect(
-    ctx, "bg2".to_string(), bg_image.clone(),
+    ctx, "bg2".to_string(), Some(bg_image.clone()),
     (3840.0, 2160.0),               // Size
     (3840.0, 0.0),                  // Position - right after bg1
-    vec!["background".to_string()], // Same tag
+    vec!["scroll".to_string()],     // Same tag
     (-5.0, 0.0),                    // Same momentum
     (1.0, 1.0), 0.0
 );
@@ -199,28 +199,59 @@ let bg2 = GameObject::new_rect(
 canvas.add_game_object("bg1".to_string(), bg1);
 canvas.add_game_object("bg2".to_string(), bg2);
 
-// Scrolling happens automatically based on momentum!
-// Or call manually:
-canvas.handle_infinite_scroll(ScrollDirection::Left, "background");
+// Scrolling happens automatically in canvas updates!
 ```
 
 **Requirements:**
-- At least 2 objects with the same tag
-- Objects wrap when they move ~10px off-screen
+- At least 2 objects with the "scroll" tag
+- Objects wrap when they move ~10px off-screen to the left
+- Called automatically by the canvas each frame
 
+### canvas.objects_in_radius()
+Gets all visible objects within a radius from a game object's center.
+```rust
+if let Some(player) = canvas.get_game_object("player") {
+    let nearby = canvas.objects_in_radius(player, 200.0);
+    for obj in nearby {
+        println!("Found {} nearby", obj.id);
+    }
+}
+```
 
+### canvas.on_key_press() / on_key_release()
+Register callbacks that fire immediately when keys are pressed or released (event-driven, not polled every frame).
+```rust
+canvas.on_key_press(|canvas, key| {
+    if let Key::Character(c) = key {
+        if c.as_str() == " " {
+            // Spawn bullet immediately on spacebar press
+            canvas.run(Action::Spawn { /* ... */ });
+        }
+    }
+});
+
+canvas.on_key_release(|canvas, key| {
+    // Handle key release
+});
+```
+
+### canvas.play_sound()
+Play a sound effect from a file (non-blocking, plays in background).
+```rust
+canvas.play_sound("assets/jump.wav");
+```
 
 ## GameObject
 
 Game entities with physics and visuals.
 
 ### GameObject::new()
-Creates a square GameObject.
+Creates a square GameObject. **Note:** Image parameter is now `Option<Image>` - pass `Some(image)` for visible objects or `None` for invisible placeholders.
 ```rust
 let player = GameObject::new(
     ctx,
     "player_id".to_string(),     // Unique ID
-    image,                        // Image to display
+    Some(image),                  // Option<Image> - use Some(image) or None
     100.0,                        // Size (100×100 square)
     (200.0, 300.0),              // Position (x, y)
     vec!["player".to_string()],  // Tags for targeting
@@ -228,15 +259,28 @@ let player = GameObject::new(
     (0.95, 0.95),                // Resistance (friction, 0.0-1.0)
     0.5,                          // Gravity (added to vy each frame)
 );
+
+// Create invisible placeholder (useful for spawn points, triggers)
+let spawn_point = GameObject::new(
+    ctx,
+    "spawn".to_string(),
+    None,                         // No image
+    50.0,
+    (100.0, 100.0),
+    vec!["spawner".to_string()],
+    (0.0, 0.0),
+    (1.0, 1.0),
+    0.0,
+);
 ```
 
 ### GameObject::new_rect()
-Creates a rectangular GameObject (width and height can differ).
+Creates a rectangular GameObject (width and height can differ). Also accepts `Option<Image>`.
 ```rust
 let platform = GameObject::new_rect(
     ctx,
     "platform".to_string(),
-    image,
+    Some(image),                 // Option<Image>
     (800.0, 50.0),               // Width × Height
     (0.0, 1000.0),
     vec!["platforms".to_string()],
@@ -246,11 +290,11 @@ let platform = GameObject::new_rect(
 );
 ```
 
-### .as_platform()
-Makes the object solid - other objects will land on it and stop falling.
+### .with_image()
+Add or change an image on a GameObject (useful if created with `None`).
 ```rust
-let ground = GameObject::new_rect(ctx, ...)
-    .as_platform();  // Now objects can stand on this
+let obj = GameObject::new(ctx, "id".to_string(), None, 100.0, ...)
+    .with_image(image);
 ```
 
 ### .with_animation()
@@ -262,8 +306,36 @@ let sprite = AnimatedSprite::new(
     12.0
 )?;
 
-let animated_player = GameObject::new(ctx, ...)
+let animated_player = GameObject::new(ctx, ..., None, ...)
     .with_animation(sprite);
+```
+
+### .with_tag() / .with_tags()
+Add tags to the GameObject for group targeting.
+```rust
+let obj = GameObject::new(ctx, ..., Some(image), ...)
+    .with_tag("enemy")
+    .with_tag("flying");
+
+// Or set all at once
+let obj = GameObject::new(ctx, ..., Some(image), ...)
+    .with_tags(vec!["enemy".to_string(), "boss".to_string()]);
+```
+
+### .with_gravity() / .with_momentum() / .with_resistance()
+Set physics properties using builder pattern.
+```rust
+let obj = GameObject::new(ctx, ..., Some(image), ...)
+    .with_gravity(2.0)
+    .with_momentum((5.0, 0.0))
+    .with_resistance((0.9, 0.98));
+```
+
+### .as_platform()
+Makes the object solid - other objects will land on it and stop falling.
+```rust
+let ground = GameObject::new_rect(ctx, ..., Some(image), ...)
+    .as_platform();  // Now objects can stand on this
 ```
 
 ### object.visible
@@ -458,7 +530,7 @@ Action::Spawn {
 }
 
 // Usage:
-let bullet = GameObject::new(ctx, "bullet".to_string(), ...);
+let bullet = GameObject::new(ctx, "bullet".to_string(), Some(image), ...);
 canvas.run(Action::Spawn {
     object: Box::new(bullet),
     location: Location::AtTarget(Box::new(Target::ById("player".to_string())))
@@ -482,8 +554,8 @@ canvas.run(Action::SetAnimation {
 });
 ```
 
-### Action::SetPosition / Teleport
-Moves object to location. Both do the same thing.
+### Action::Teleport
+Moves object to location.
 ```rust
 Action::Teleport {
     target: Target::ById("player".to_string()),
@@ -495,7 +567,7 @@ canvas.run(Action::Teleport {
     target: Target::ById("player".to_string()),
     location: Location::OnTarget {
         target: Box::new(Target::ById("spawn_point".to_string())),
-        anchor: Anchor::Center,
+        anchor: Anchor { x: 0.5, y: 0.5 },
         offset: (0.0, 0.0)
     }
 });
@@ -558,6 +630,19 @@ canvas.run(Action::TransferMomentum {
 });
 ```
 
+### Action::Custom
+Trigger a custom event handler by name.
+```rust
+Action::Custom {
+    name: "spawn_wave".to_string()
+}
+
+// Usage:
+canvas.run(Action::Custom {
+    name: "level_complete".to_string()
+});
+```
+
 ## Targets
 
 Select which objects an action affects.
@@ -567,6 +652,9 @@ Target single object by unique ID.
 ```rust
 Target::ById("player".to_string())
 Target::ById("enemy_3".to_string())
+
+// Helper method:
+Target::id("player")
 ```
 
 ### Target::ByTag
@@ -574,12 +662,18 @@ Target all objects with a specific tag.
 ```rust
 Target::ByTag("enemies".to_string())
 Target::ByTag("collectibles".to_string())
+
+// Helper method:
+Target::tag("enemies")
 ```
 
 ### Target::ByName
 Target object by the name used in `add_game_object()`.
 ```rust
 Target::ByName("player".to_string())
+
+// Helper method:
+Target::name("player")
 ```
 
 ## Locations
@@ -590,6 +684,9 @@ Specify where to place objects.
 Absolute (x, y) coordinates.
 ```rust
 Location::Position((100.0, 200.0))
+
+// Helper method:
+Location::at(100.0, 200.0)
 ```
 
 ### Location::AtTarget
@@ -621,17 +718,20 @@ Position relative to object using anchors.
 ```rust
 Location::OnTarget {
     target: Box::new(Target::ById("platform".to_string())),
-    anchor: Anchor::TopCenter,
-    offset: (0.0, -10.0)  // 10 units above center
+    anchor: Anchor { x: 0.5, y: 0.0 },  // Top center
+    offset: (0.0, -10.0)  // 10 units above
 }
 ```
 
 ## Anchors
 
-Reference points on objects for positioning.
+Reference points on objects for positioning (0.0 to 1.0 range).
 ```rust
-Anchor { x: 0.5, y: 0.5 }  // Center (0.0-1.0 range)
-Anchor { x: 0.25, y: 0.75 } // 25% from left, 75% from top
+Anchor { x: 0.5, y: 0.5 }  // Center
+Anchor { x: 0.0, y: 0.0 }  // Top-left
+Anchor { x: 1.0, y: 1.0 }  // Bottom-right
+Anchor { x: 0.5, y: 0.0 }  // Top-center
+Anchor { x: 0.5, y: 1.0 }  // Bottom-center
 ```
 
 ## Conditions
@@ -790,49 +890,31 @@ GameEvent::Tick {
 ### GameEvent::Custom
 Trigger custom named events with your own logic.
 ```rust
-// Define a custom event
+// Register a custom event handler
+canvas.register_custom_event("spawn_wave".to_string(), |canvas| {
+    // Your custom logic here
+    for i in 0..5 {
+        let x = 100.0 + (i as f32 * 200.0);
+        canvas.run(Action::Spawn {
+            object: Box::new(create_enemy(x, 500.0)),
+            location: Location::Position((x, 500.0))
+        });
+    }
+});
+
+// Trigger it from an action
+canvas.run(Action::Custom {
+    name: "spawn_wave".to_string()
+});
+
+// Or add as an event
 canvas.add_event(
     GameEvent::Custom {
         name: "spawn_wave".to_string(),
-        target: Target::ById("game_manager".to_string())
+        target: Target::ById("spawner".to_string())
     },
-    Target::ById("game_manager".to_string())
+    Target::ById("spawner".to_string())
 );
-
-// Set up custom event handler with your own code
-canvas.on_custom("spawn_wave", |canvas| {
-    // Your custom logic here - anything you want!
-    for i in 0..5 {
-        let x = 100.0 + (i as f32 * 200.0);
-        let y = (i as f32 * 50.0).sin() * 100.0 + 500.0;  // Wave pattern
-        
-        canvas.run(Action::Spawn {
-            object: Box::new(create_enemy(x, y)),
-            location: Location::Position((x, y))
-        });
-    }
-    
-    // Do math, check conditions, spawn objects, etc.
-    let total_enemies = canvas.get_target_indices(&Target::ByTag("enemies".to_string())).len();
-    if total_enemies > 10 {
-        canvas.run(Action::Remove {
-            target: Target::ByTag("powerups".to_string())
-        });
-    }
-});
-
-// Trigger it anywhere
-canvas.trigger_custom_event("spawn_wave");
-
-// Example: Timer-based custom event
-let mut timer = 0;
-canvas.on_tick(move |canvas| {
-    timer += 1;
-    if timer >= 180 {  // Every 3 seconds
-        timer = 0;
-        canvas.trigger_custom_event("spawn_wave");
-    }
-});
 ```
 
 ## Keys
@@ -843,7 +925,7 @@ Key::Character("w".to_string().into())
 Key::Character("a".to_string().into())
 Key::Character("s".to_string().into())
 Key::Character("d".to_string().into())
-Key::Character(" ".to_string().into()) //Spacebar input is just empty space
+Key::Character(" ".to_string().into()) // Spacebar
 ```
 
 ## Physics
@@ -879,7 +961,7 @@ impl MyApp {
         };
         
         let player = GameObject::new(
-            ctx, "player".to_string(), player_img, 100.0,
+            ctx, "player".to_string(), Some(player_img), 100.0,
             (500.0, 1000.0), vec!["player".to_string()],
             (0.0, 0.0), (0.98, 0.98), 1.2
         );
@@ -894,7 +976,7 @@ impl MyApp {
         };
         
         let ground = GameObject::new_rect(
-            ctx, "ground".to_string(), ground_img,
+            ctx, "ground".to_string(), Some(ground_img),
             (3840.0, 50.0), (0.0, 2000.0),
             vec!["ground".to_string()],
             (0.0, 0.0), (1.0, 1.0), 0.0
