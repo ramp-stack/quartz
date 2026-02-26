@@ -1,8 +1,9 @@
-use prism::event::OnEvent;
-use prism::drawable::{Drawable, Component};
+use prism::event::{OnEvent, Event, TickEvent};
+use prism::drawable::{Drawable, Component, SizedTree};
 use prism::Context;
 use prism::layout::{Area, SizeRequest};
 use prism::canvas::{Image, ShapeType};
+use prism::display::Opt;
 
 use std::cell::Cell;
 
@@ -71,7 +72,7 @@ pub enum Condition {
     IsHidden(Target),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum Action {
     ApplyMomentum {
         target: Target,
@@ -160,7 +161,6 @@ pub enum GameEvent {
 }
 
 impl GameEvent {
-    // Helper methods to reduce pattern matching verbosity
     pub fn is_key_press(&self) -> bool {
         matches!(self, GameEvent::KeyPress { .. })
     }
@@ -296,6 +296,7 @@ impl std::fmt::Debug for GameEvent {
 
 #[derive(Clone, Debug)]
 pub struct GameObject {
+    layout: prism::layout::Stack,
     pub id: String,
     pub tags: Vec<String>,
     image: Option<Image>,
@@ -329,16 +330,17 @@ impl Component for GameObject {
         }
     }
     
-    fn request_size(&self, _children: Vec<SizeRequest>) -> SizeRequest {
-        SizeRequest::new(self.size.0, self.size.1, self.size.0, self.size.1)
-    }
+    // fn request_size(&self, _children: Vec<SizeRequest>) -> SizeRequest {
+    //     SizeRequest::new(self.size.0, self.size.1, self.size.0, self.size.1)
+    // }
     
-    fn build(&self, _size: (f32, f32), _children: Vec<SizeRequest>) -> Vec<Area> {
-        let scaled = self.scaled_size.get();
-        vec![Area {
-            offset: (0.0, 0.0),
-            size: scaled
-        }]
+    fn layout(&self) -> &dyn prism::layout::Layout {
+        // let scaled = self.scaled_size.get();
+        // vec![Area {
+        //     offset: (0.0, 0.0),
+        //     size: scaled
+        // }]
+        &self.layout
     }
 }
 
@@ -355,6 +357,7 @@ impl GameObject {
         gravity: f32,
     ) -> Self {
         Self {
+            layout: prism::layout::Stack::default(),
             id,
             tags,
             image,
@@ -394,6 +397,7 @@ impl GameObject {
             scaled_size: Cell::new(size),
             is_platform: false,
             visible: true,
+            layout: prism::layout::Stack::default()
         }
     }
     

@@ -7,20 +7,24 @@ use prism::drawable::SizedTree;
 
 pub use prism::Context;
 
-pub use prism::canvas::{ShapeType, Image};
+pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
 
 mod game_object;
 mod animation;
 mod apis;
+mod scene;
+mod camera;
 
 pub use game_object::{GameObject, Action, Target, Location, GameEvent, Condition, Anchor};
 pub use animation::AnimatedSprite;
+pub use scene::{Scene, SceneManager};
+pub use camera::Camera;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
-    Landscape, 
-    Portrait,  
+    Landscape,
+    Portrait,
 }
 
 impl CanvasMode {
@@ -30,7 +34,7 @@ impl CanvasMode {
             CanvasMode::Portrait => 9.0 / 16.0,
         }
     }
-    
+
     fn virtual_resolution(&self) -> (f32, f32) {
         match self {
             CanvasMode::Landscape => (3840.0, 2160.0),
@@ -39,7 +43,7 @@ impl CanvasMode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CanvasLayout {
     offsets: Vec<(f32, f32)>,
     canvas_size: Cell<(f32, f32)>,
@@ -57,29 +61,29 @@ impl Layout for CanvasLayout {
         if self.offsets.len() != children.len() {
             panic!("CanvasLayout does not have the same number of offsets as children!");
         }
-        
+
         let virtual_res = self.mode.virtual_resolution();
         let scale = (size.0 / virtual_res.0).min(size.1 / virtual_res.1);
         let canvas_width = virtual_res.0 * scale;
         let canvas_height = virtual_res.1 * scale;
         let padding_x = (size.0 - canvas_width) / 2.0;
         let padding_y = (size.1 - canvas_height) / 2.0;
-        
+
         self.scale.set(scale);
         self.safe_area_offset.set((padding_x, padding_y));
         self.canvas_size.set(virtual_res);
-        
+
         self.offsets.iter().copied().zip(children).map(|(offset, child)| {
             let child_size = child.get((f32::MAX, f32::MAX));
             Area {
                 offset: (offset.0 * scale + padding_x, offset.1 * scale + padding_y),
-                size: (child_size.0 * scale, child_size.1 * scale)
+                size: (child_size.0 * scale, child_size.1 * scale),
             }
         }).collect()
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Canvas {
     layout: CanvasLayout,
     objects: Vec<GameObject>,
@@ -89,12 +93,12 @@ pub struct Canvas {
     #[skip] object_events: Vec<Vec<GameEvent>>,
     #[skip] tag_to_indices: HashMap<String, Vec<usize>>,
     #[skip] held_keys: HashSet<Key>,
-    #[skip] tick_callbacks: Vec<Box<dyn FnMut(&mut Canvas) + 'static>>,
-    #[skip] custom_event_handlers: HashMap<String, Box<dyn FnMut(&mut Canvas) + 'static>>,
-    /// Callbacks fired immediately when a key is pressed (event-driven, not tick-polled).
-    #[skip] key_press_callbacks: Vec<Box<dyn FnMut(&mut Canvas, &Key) + 'static>>,
-    /// Callbacks fired immediately when a key is released.
-    #[skip] key_release_callbacks: Vec<Box<dyn FnMut(&mut Canvas, &Key) + 'static>>,
+    #[skip] tick_callbacks: Vec<Box<dyn EventCallback>>,
+    #[skip] custom_event_handlers: HashMap<String, Box<dyn EventCallback>>,
+    #[skip] key_press_callbacks: Vec<Box<dyn Callback>>,
+    #[skip] key_release_callbacks: Vec<Box<dyn Callback>>,
+    #[skip] scene_manager: SceneManager,
+    #[skip] active_camera: Option<Camera>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -112,34 +116,51 @@ impl std::fmt::Debug for Canvas {
             .field("custom_event_handlers", &format!("<{} handlers>", self.custom_event_handlers.len()))
             .field("key_press_callbacks", &format!("<{} callbacks>", self.key_press_callbacks.len()))
             .field("key_release_callbacks", &format!("<{} callbacks>", self.key_release_callbacks.len()))
+            .field("scene_manager", &self.scene_manager)
+            .field("active_camera", &self.active_camera)
             .finish()
     }
 }
 
 impl Canvas {
-    pub fn on_key_press(&mut self, cb: impl FnMut(&mut Canvas, &Key) + 'static) {
+    pub fn on_key_press(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static) {
         self.key_press_callbacks.push(Box::new(cb));
     }
 
-    pub fn on_key_release(&mut self, cb: impl FnMut(&mut Canvas, &Key) + 'static) {
+    pub fn on_key_release(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static) {
         self.key_release_callbacks.push(Box::new(cb));
     }
-    
-    /// Helper function to check collision between two objects using AABB
+
+    pub fn set_camera(&mut self, camera: Camera) {
+        self.active_camera = Some(camera);
+    }
+
+    pub fn clear_camera(&mut self) {
+        self.active_camera = None;
+    }
+
+    pub fn camera(&self) -> Option<&Camera> {
+        self.active_camera.as_ref()
+    }
+
+    pub fn camera_mut(&mut self) -> Option<&mut Camera> {
+        self.active_camera.as_mut()
+    }
+
     fn check_collision(obj1: &GameObject, obj2: &GameObject) -> bool {
         if !obj1.visible || !obj2.visible {
             return false;
         }
-        
+
         let obj1_right = obj1.position.0 + obj1.size.0;
         let obj1_bottom = obj1.position.1 + obj1.size.1;
         let obj2_right = obj2.position.0 + obj2.size.0;
         let obj2_bottom = obj2.position.1 + obj2.size.1;
-        
-        obj1.position.0 < obj2_right &&
-        obj1_right > obj2.position.0 &&
-        obj1.position.1 < obj2_bottom &&
-        obj1_bottom > obj2.position.1
+
+        obj1.position.0 < obj2_right
+            && obj1_right > obj2.position.0
+            && obj1.position.1 < obj2_bottom
+            && obj1_bottom > obj2.position.1
     }
 }
 
@@ -174,21 +195,21 @@ impl OnEvent for Canvas {
                 _ => {}
             }
         }
-        
+
         if let Some(_tick) = event.downcast_ref::<TickEvent>() {
             const DELTA_TIME: f32 = 0.016;
-            
+
             let mut callbacks = std::mem::take(&mut self.tick_callbacks);
             callbacks.iter_mut().for_each(|cb| cb(self));
             self.tick_callbacks = callbacks;
-            
+
             let held_keys = self.held_keys.clone();
             self.process_all_events(GameEvent::is_key_hold, |e| {
                 e.key().map_or(false, |key| held_keys.contains(key))
             });
-            
+
             self.process_all_events(GameEvent::is_tick, |_| true);
-            
+
             let custom_event_names: Vec<String> = (0..self.objects.len())
                 .filter_map(|idx| self.object_events.get(idx))
                 .flatten()
@@ -200,16 +221,15 @@ impl OnEvent for Canvas {
                     }
                 })
                 .collect();
-            
+
             for name in custom_event_names {
                 if let Some(mut handler) = self.custom_event_handlers.remove(&name) {
                     handler(self);
                     self.custom_event_handlers.insert(name, handler);
                 }
             }
-            
+
             self.update_objects(DELTA_TIME);
-            
             self.handle_collisions();
         }
 
@@ -228,10 +248,10 @@ impl Canvas {
             .filter(|e| predicate(e) && e.key() == Some(key))
             .map(|e| e.action().clone())
             .collect();
-        
+
         actions.into_iter().for_each(|action| self.run(action));
     }
-    
+
     fn process_all_events<F, P>(&mut self, predicate: F, should_run: P)
     where
         F: Fn(&GameEvent) -> bool,
@@ -243,21 +263,21 @@ impl Canvas {
             .filter(|e| predicate(e) && should_run(e))
             .map(|e| e.action().clone())
             .collect();
-        
+
         actions.into_iter().for_each(|action| self.run(action));
     }
-    
+
     fn update_objects(&mut self, delta_time: f32) {
         let scale = self.layout.scale.get();
-        
+
         for (idx, obj) in self.objects.iter_mut().enumerate() {
             obj.scaled_size.set((obj.size.0 * scale, obj.size.1 * scale));
             obj.update_animation(delta_time);
-            
+
             if obj.animated_sprite.is_none() {
                 obj.update_image_shape();
             }
-            
+
             if obj.visible {
                 obj.apply_gravity();
                 obj.update_position();
@@ -265,27 +285,57 @@ impl Canvas {
                 self.layout.offsets[idx] = obj.position;
             }
         }
-        
+
         self.handle_infinite_scroll();
+
+        self.apply_camera_transform();
     }
-    
+
+    fn apply_camera_transform(&mut self) {
+        let mut cam = match self.active_camera.take() {
+            Some(c) => c,
+            None => return, 
+        };
+
+        if let Some(target) = cam.follow_target.clone() {
+            if let Some(idx) = self.get_target_indices(&target).first().copied() {
+                if let Some(obj) = self.objects.get(idx) {
+                    let cx = obj.position.0 + obj.size.0 * 0.5;
+                    let cy = obj.position.1 + obj.size.1 * 0.5;
+                    cam.lerp_toward(cx, cy);
+                }
+            }
+        }
+
+        let cam_x = cam.position.0;
+        let cam_y = cam.position.1;
+        for (idx, obj) in self.objects.iter().enumerate() {
+            self.layout.offsets[idx] = (
+                obj.position.0 - cam_x,
+                obj.position.1 - cam_y,
+            );
+        }
+
+        self.active_camera = Some(cam);
+    }
+
     fn handle_collisions(&mut self) {
         let mut adjustments = Vec::new();
         let mut collision_pairs = Vec::new();
-        
+
         for i in 0..self.objects.len() {
             if !self.objects[i].visible {
                 continue;
             }
-            
+
             for j in (i + 1)..self.objects.len() {
                 if !self.objects[j].visible {
                     continue;
                 }
-                
+
                 let obj1 = &self.objects[i];
                 let obj2 = &self.objects[j];
-                
+
                 if Self::check_collision(obj1, obj2) {
                     if obj2.is_platform && obj1.momentum.1 > 0.0 {
                         let obj1_bottom = obj1.position.1 + obj1.size.1;
@@ -298,26 +348,32 @@ impl Canvas {
                             adjustments.push((j, obj1.position.1 - obj2.size.1));
                         }
                     }
-                    
+
                     if !obj1.is_platform && !obj2.is_platform {
                         collision_pairs.push((i, j));
                     }
                 }
             }
         }
-        
+
         for (idx, new_y) in adjustments {
             self.objects[idx].position.1 = new_y;
             self.objects[idx].momentum.1 = 0.0;
-            self.layout.offsets[idx] = self.objects[idx].position;
+            let cam_offset = self.active_camera.as_ref()
+                .map(|c| c.position)
+                .unwrap_or((0.0, 0.0));
+            self.layout.offsets[idx] = (
+                self.objects[idx].position.0 - cam_offset.0,
+                self.objects[idx].position.1 - cam_offset.1,
+            );
         }
-        
+
         for (i, j) in collision_pairs {
             self.trigger_collision_events(i);
             self.trigger_collision_events(j);
         }
     }
-    
+
     fn evaluate_condition(&self, condition: &Condition) -> bool {
         match condition {
             Condition::Always => true,
@@ -329,7 +385,6 @@ impl Canvas {
                         if idx1 == idx2 {
                             return false;
                         }
-                        
                         match (self.objects.get(idx1), self.objects.get(idx2)) {
                             (Some(obj1), Some(obj2)) => Self::check_collision(obj1, obj2),
                             _ => false,
@@ -351,7 +406,7 @@ impl Canvas {
             }
         }
     }
-    
+
     fn trigger_collision_events(&mut self, idx: usize) {
         let actions: Vec<_> = self.object_events.get(idx)
             .into_iter()
@@ -362,10 +417,9 @@ impl Canvas {
                 None
             })
             .collect();
-        
+
         actions.into_iter().for_each(|action| self.run(action));
     }
-    
 
     fn trigger_boundary_collision_events(&mut self, idx: usize) {
         let actions: Vec<_> = self.object_events.get(idx)
@@ -377,17 +431,17 @@ impl Canvas {
                 None
             })
             .collect();
-        
+
         actions.into_iter().for_each(|action| self.run(action));
     }
 
     pub fn register_custom_event<F>(&mut self, name: String, handler: F)
     where
-        F: FnMut(&mut Canvas) + 'static,
+        F: FnMut(&mut Canvas) + Clone + 'static,
     {
         self.custom_event_handlers.insert(name, Box::new(handler));
     }
-    
+
     fn apply_to_targets<F>(&mut self, target: &Target, mut f: F)
     where
         F: FnMut(&mut GameObject),
@@ -399,7 +453,7 @@ impl Canvas {
             }
         }
     }
-    
+
     fn get_target_indices(&self, target: &Target) -> Vec<usize> {
         match target {
             Target::ByName(name) => self.name_to_index.get(name).map(|&idx| vec![idx]).unwrap_or_default(),
@@ -407,7 +461,7 @@ impl Canvas {
             Target::ByTag(tag) => self.tag_to_indices.get(tag).cloned().unwrap_or_default(),
         }
     }
-    
+
     fn get_target_names(&self, target: &Target) -> Vec<String> {
         self.get_target_indices(target).iter()
             .filter_map(|&idx| self.object_names.get(idx).cloned())
@@ -452,5 +506,57 @@ impl Location {
                     .unwrap_or(*offset)
             }
         }
+    }
+}
+
+pub trait EventCallback: FnMut(&mut Canvas) + 'static {
+    fn clone_box(&self) -> Box<dyn EventCallback>;
+}
+
+impl PartialEq for dyn EventCallback {
+    fn eq(&self, _: &Self) -> bool { true }
+}
+
+impl<F> EventCallback for F where F: FnMut(&mut Canvas) + Clone + 'static {
+    fn clone_box(&self) -> Box<dyn EventCallback> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn EventCallback> {
+    fn clone(&self) -> Self {
+        self.as_ref().clone_box()
+    }
+}
+
+impl std::fmt::Debug for dyn EventCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Clonable Closure")
+    }
+}
+
+pub trait Callback: FnMut(&mut Canvas, &Key) + 'static {
+    fn clone_box(&self) -> Box<dyn Callback>;
+}
+
+impl PartialEq for dyn Callback {
+    fn eq(&self, _: &Self) -> bool { true }
+}
+
+impl<F> Callback for F where F: FnMut(&mut Canvas, &Key) + Clone + 'static {
+    fn clone_box(&self) -> Box<dyn Callback> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn Callback> {
+    fn clone(&self) -> Self {
+        self.as_ref().clone_box()
+    }
+}
+
+impl std::fmt::Debug for dyn Callback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Clonable Closure")
     }
 }
