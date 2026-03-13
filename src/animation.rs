@@ -42,6 +42,17 @@ impl AnimatedSprite {
             size,
         })
     }
+
+    pub fn from_frames(frames: Vec<RgbaImage>, size: (f32, f32), fps: f32) -> Self {
+        assert!(!frames.is_empty(), "AnimatedSprite::from_frames requires at least one frame");
+        Self {
+            frames,
+            current_frame: 0,
+            frame_duration: 1.0 / fps,
+            time_since_last_frame: 0.0,
+            size,
+        }
+    }
     
     pub fn update(&mut self, delta_time: f32) {
         self.time_since_last_frame += delta_time;
@@ -93,5 +104,3 @@ impl std::fmt::Debug for AnimatedSprite {
             .finish()
     }
 }
-
-
