@@ -43,7 +43,6 @@ impl AnimatedSprite {
         })
     }
 
-    /// Build a sprite directly from pre-decoded RGBA frames (e.g. from PNG sheets).
     pub fn from_frames(frames: Vec<RgbaImage>, size: (f32, f32), fps: f32) -> Self {
         assert!(!frames.is_empty(), "AnimatedSprite::from_frames requires at least one frame");
         Self {

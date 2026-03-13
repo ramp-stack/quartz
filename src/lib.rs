@@ -1,4 +1,4 @@
-use prism::event::{OnEvent, Event, TickEvent, KeyboardEvent, KeyboardState};
+use prism::event::{OnEvent, Event, TickEvent, KeyboardEvent, KeyboardState, MouseEvent, MouseState};
 use prism::drawable::Component;
 use prism::layout::{Area, SizeRequest, Layout};
 use std::collections::{HashMap, HashSet};
@@ -15,16 +15,22 @@ mod animation;
 mod apis;
 mod scene;
 mod camera;
+mod mouse;
 
-pub use game_object::{GameObject, Action, Target, Location, GameEvent, Condition, Anchor};
+pub use game_object::{
+    GameObject, Action, Target, Location, GameEvent, Condition, Anchor,
+    MouseButton, ScrollAxis,
+};
 pub use animation::AnimatedSprite;
 pub use scene::{Scene, SceneManager};
 pub use camera::Camera;
+pub use mouse::{MouseCallback, MouseMoveCallback, MouseScrollCallback};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
     Landscape,
     Portrait,
+    Fullscreen,
 }
 
 impl CanvasMode {
@@ -32,16 +38,19 @@ impl CanvasMode {
         match self {
             CanvasMode::Landscape => 16.0 / 9.0,
             CanvasMode::Portrait => 9.0 / 16.0,
+            CanvasMode::Fullscreen => 1.0,
         }
     }
 
-    fn virtual_resolution(&self) -> (f32, f32) {
+    fn virtual_resolution(&self) -> Option<(f32, f32)> {
         match self {
-            CanvasMode::Landscape => (3840.0, 2160.0),
-            CanvasMode::Portrait => (2160.0, 3840.0),
+            CanvasMode::Landscape => Some((3840.0, 2160.0)),
+            CanvasMode::Portrait  => Some((2160.0, 3840.0)),
+            CanvasMode::Fullscreen => None,
         }
     }
 }
+
 
 #[derive(Debug, Clone)]
 pub struct CanvasLayout {
@@ -62,26 +71,40 @@ impl Layout for CanvasLayout {
             panic!("CanvasLayout does not have the same number of offsets as children!");
         }
 
-        let virtual_res = self.mode.virtual_resolution();
-        let scale = (size.0 / virtual_res.0).min(size.1 / virtual_res.1);
-        let canvas_width = virtual_res.0 * scale;
-        let canvas_height = virtual_res.1 * scale;
-        let padding_x = (size.0 - canvas_width) / 2.0;
-        let padding_y = (size.1 - canvas_height) / 2.0;
+        let (scale, padding_x, padding_y, virtual_res) = match self.mode.virtual_resolution() {
+            None => {
+                (1.0_f32, 0.0_f32, 0.0_f32, size)
+            }
+            Some(vres) => {
+                let s = (size.0 / vres.0).min(size.1 / vres.1);
+                let pw = (size.0 - vres.0 * s) / 2.0;
+                let ph = (size.1 - vres.1 * s) / 2.0;
+                (s, pw, ph, vres)
+            }
+        };
 
         self.scale.set(scale);
         self.safe_area_offset.set((padding_x, padding_y));
         self.canvas_size.set(virtual_res);
 
-        self.offsets.iter().copied().zip(children).map(|(offset, child)| {
-            let child_size = child.get((f32::MAX, f32::MAX));
-            Area {
-                offset: (offset.0 * scale + padding_x, offset.1 * scale + padding_y),
-                size: (child_size.0 * scale, child_size.1 * scale),
-            }
-        }).collect()
+        self.offsets
+            .iter()
+            .copied()
+            .zip(children)
+            .map(|(offset, child)| {
+                let child_size = child.get((f32::MAX, f32::MAX));
+                Area {
+                    offset: (
+                        offset.0 * scale + padding_x,
+                        offset.1 * scale + padding_y,
+                    ),
+                    size: (child_size.0 * scale, child_size.1 * scale),
+                }
+            })
+            .collect()
     }
 }
+
 
 #[derive(Component, Clone)]
 pub struct Canvas {
@@ -99,6 +122,12 @@ pub struct Canvas {
     #[skip] key_release_callbacks: Vec<Box<dyn Callback>>,
     #[skip] scene_manager: SceneManager,
     #[skip] active_camera: Option<Camera>,
+    #[skip] mouse_position: Option<(f32, f32)>,
+    #[skip] hovered_indices: HashSet<usize>,
+    #[skip] mouse_press_callbacks: Vec<Box<dyn MouseCallback>>,
+    #[skip] mouse_release_callbacks: Vec<Box<dyn MouseCallback>>,
+    #[skip] mouse_move_callbacks: Vec<Box<dyn MouseMoveCallback>>,
+    #[skip] mouse_scroll_callbacks: Vec<Box<dyn MouseScrollCallback>>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -106,21 +135,12 @@ impl std::fmt::Debug for Canvas {
         f.debug_struct("Canvas")
             .field("layout", &self.layout)
             .field("objects", &self.objects)
-            .field("object_names", &self.object_names)
-            .field("name_to_index", &self.name_to_index)
-            .field("id_to_index", &self.id_to_index)
-            .field("object_events", &self.object_events)
-            .field("tag_to_indices", &self.tag_to_indices)
-            .field("held_keys", &self.held_keys)
-            .field("tick_callbacks", &format!("<{} callbacks>", self.tick_callbacks.len()))
-            .field("custom_event_handlers", &format!("<{} handlers>", self.custom_event_handlers.len()))
-            .field("key_press_callbacks", &format!("<{} callbacks>", self.key_press_callbacks.len()))
-            .field("key_release_callbacks", &format!("<{} callbacks>", self.key_release_callbacks.len()))
-            .field("scene_manager", &self.scene_manager)
-            .field("active_camera", &self.active_camera)
+            .field("mouse_position", &self.mouse_position)
+            .field("hovered_indices", &self.hovered_indices)
             .finish()
     }
 }
+
 
 impl Canvas {
     pub fn on_key_press(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static) {
@@ -164,8 +184,14 @@ impl Canvas {
     }
 }
 
+
 impl OnEvent for Canvas {
-    fn on_event(&mut self, _ctx: &mut Context, _tree: &SizedTree, event: Box<dyn Event>) -> Vec<Box<dyn Event>> {
+    fn on_event(
+        &mut self,
+        _ctx: &mut Context,
+        _tree: &SizedTree,
+        event: Box<dyn Event>,
+    ) -> Vec<Box<dyn Event>> {
         if let Some(KeyboardEvent { state, key }) = event.downcast_ref() {
             match state {
                 KeyboardState::Pressed if self.held_keys.insert(key.clone()) => {
@@ -196,6 +222,10 @@ impl OnEvent for Canvas {
             }
         }
 
+        if let Some(mouse_evt) = event.downcast_ref::<MouseEvent>() {
+            self.handle_mouse_event(mouse_evt.clone());
+        }
+
         if let Some(_tick) = event.downcast_ref::<TickEvent>() {
             const DELTA_TIME: f32 = 0.016;
 
@@ -209,6 +239,11 @@ impl OnEvent for Canvas {
             });
 
             self.process_all_events(GameEvent::is_tick, |_| true);
+
+            if let Some(pos) = self.mouse_position {
+                let virtual_pos = self.screen_to_virtual(pos);
+                self.process_mouse_over_events(virtual_pos);
+            }
 
             let custom_event_names: Vec<String> = (0..self.objects.len())
                 .filter_map(|idx| self.object_events.get(idx))
@@ -234,6 +269,20 @@ impl OnEvent for Canvas {
         }
 
         vec![event]
+    }
+}
+
+impl Canvas {
+    pub(crate) fn screen_to_virtual(&self, screen_pos: (f32, f32)) -> (f32, f32) {
+        let scale = self.layout.scale.get();
+        let (pad_x, pad_y) = self.layout.safe_area_offset.get();
+        if scale == 0.0 {
+            return screen_pos;
+        }
+        (
+            (screen_pos.0 - pad_x) / scale,
+            (screen_pos.1 - pad_y) / scale,
+        )
     }
 }
 
@@ -287,14 +336,13 @@ impl Canvas {
         }
 
         self.handle_infinite_scroll();
-
         self.apply_camera_transform();
     }
 
     fn apply_camera_transform(&mut self) {
         let mut cam = match self.active_camera.take() {
             Some(c) => c,
-            None => return, 
+            None => return,
         };
 
         if let Some(target) = cam.follow_target.clone() {
@@ -310,10 +358,7 @@ impl Canvas {
         let cam_x = cam.position.0;
         let cam_y = cam.position.1;
         for (idx, obj) in self.objects.iter().enumerate() {
-            self.layout.offsets[idx] = (
-                obj.position.0 - cam_x,
-                obj.position.1 - cam_y,
-            );
+            self.layout.offsets[idx] = (obj.position.0 - cam_x, obj.position.1 - cam_y);
         }
 
         self.active_camera = Some(cam);
@@ -324,14 +369,9 @@ impl Canvas {
         let mut collision_pairs = Vec::new();
 
         for i in 0..self.objects.len() {
-            if !self.objects[i].visible {
-                continue;
-            }
-
+            if !self.objects[i].visible { continue; }
             for j in (i + 1)..self.objects.len() {
-                if !self.objects[j].visible {
-                    continue;
-                }
+                if !self.objects[j].visible { continue; }
 
                 let obj1 = &self.objects[i];
                 let obj2 = &self.objects[j];
@@ -348,7 +388,6 @@ impl Canvas {
                             adjustments.push((j, obj1.position.1 - obj2.size.1));
                         }
                     }
-
                     if !obj1.is_platform && !obj2.is_platform {
                         collision_pairs.push((i, j));
                     }
@@ -359,9 +398,7 @@ impl Canvas {
         for (idx, new_y) in adjustments {
             self.objects[idx].position.1 = new_y;
             self.objects[idx].momentum.1 = 0.0;
-            let cam_offset = self.active_camera.as_ref()
-                .map(|c| c.position)
-                .unwrap_or((0.0, 0.0));
+            let cam_offset = self.active_camera.as_ref().map(|c| c.position).unwrap_or((0.0, 0.0));
             self.layout.offsets[idx] = (
                 self.objects[idx].position.0 - cam_offset.0,
                 self.objects[idx].position.1 - cam_offset.1,
@@ -382,9 +419,7 @@ impl Canvas {
             Condition::Collision(target) => {
                 self.get_target_indices(target).iter().any(|&idx1| {
                     (0..self.objects.len()).any(|idx2| {
-                        if idx1 == idx2 {
-                            return false;
-                        }
+                        if idx1 == idx2 { return false; }
                         match (self.objects.get(idx1), self.objects.get(idx2)) {
                             (Some(obj1), Some(obj2)) => Self::check_collision(obj1, obj2),
                             _ => false,
@@ -411,13 +446,8 @@ impl Canvas {
         let actions: Vec<_> = self.object_events.get(idx)
             .into_iter()
             .flatten()
-            .filter_map(|e| if let GameEvent::Collision { action, .. } = e {
-                Some(action.clone())
-            } else {
-                None
-            })
+            .filter_map(|e| if let GameEvent::Collision { action, .. } = e { Some(action.clone()) } else { None })
             .collect();
-
         actions.into_iter().for_each(|action| self.run(action));
     }
 
@@ -425,13 +455,8 @@ impl Canvas {
         let actions: Vec<_> = self.object_events.get(idx)
             .into_iter()
             .flatten()
-            .filter_map(|e| if let GameEvent::BoundaryCollision { action, .. } = e {
-                Some(action.clone())
-            } else {
-                None
-            })
+            .filter_map(|e| if let GameEvent::BoundaryCollision { action, .. } = e { Some(action.clone()) } else { None })
             .collect();
-
         actions.into_iter().for_each(|action| self.run(action));
     }
 
@@ -448,9 +473,7 @@ impl Canvas {
     {
         let indices = self.get_target_indices(target);
         for idx in indices {
-            if let Some(obj) = self.objects.get_mut(idx) {
-                f(obj);
-            }
+            if let Some(obj) = self.objects.get_mut(idx) { f(obj); }
         }
     }
 
@@ -482,12 +505,10 @@ impl Location {
             Location::Between(target1, target2) => {
                 let pos1 = canvas.get_target_indices(target1).first()
                     .and_then(|&idx| canvas.objects.get(idx))
-                    .map(|obj| obj.position)
-                    .unwrap_or((0.0, 0.0));
+                    .map(|obj| obj.position).unwrap_or((0.0, 0.0));
                 let pos2 = canvas.get_target_indices(target2).first()
                     .and_then(|&idx| canvas.objects.get(idx))
-                    .map(|obj| obj.position)
-                    .unwrap_or((0.0, 0.0));
+                    .map(|obj| obj.position).unwrap_or((0.0, 0.0));
                 ((pos1.0 + pos2.0) / 2.0, (pos1.1 + pos2.1) / 2.0)
             }
             Location::Relative { target, offset } => {
@@ -509,54 +530,35 @@ impl Location {
     }
 }
 
+
 pub trait EventCallback: FnMut(&mut Canvas) + 'static {
     fn clone_box(&self) -> Box<dyn EventCallback>;
 }
-
 impl PartialEq for dyn EventCallback {
     fn eq(&self, _: &Self) -> bool { true }
 }
-
 impl<F> EventCallback for F where F: FnMut(&mut Canvas) + Clone + 'static {
-    fn clone_box(&self) -> Box<dyn EventCallback> {
-        Box::new(self.clone())
-    }
+    fn clone_box(&self) -> Box<dyn EventCallback> { Box::new(self.clone()) }
 }
-
 impl Clone for Box<dyn EventCallback> {
-    fn clone(&self) -> Self {
-        self.as_ref().clone_box()
-    }
+    fn clone(&self) -> Self { self.as_ref().clone_box() }
 }
-
 impl std::fmt::Debug for dyn EventCallback {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Clonable Closure")
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Clonable Closure") }
 }
 
 pub trait Callback: FnMut(&mut Canvas, &Key) + 'static {
     fn clone_box(&self) -> Box<dyn Callback>;
 }
-
 impl PartialEq for dyn Callback {
     fn eq(&self, _: &Self) -> bool { true }
 }
-
 impl<F> Callback for F where F: FnMut(&mut Canvas, &Key) + Clone + 'static {
-    fn clone_box(&self) -> Box<dyn Callback> {
-        Box::new(self.clone())
-    }
+    fn clone_box(&self) -> Box<dyn Callback> { Box::new(self.clone()) }
 }
-
 impl Clone for Box<dyn Callback> {
-    fn clone(&self) -> Self {
-        self.as_ref().clone_box()
-    }
+    fn clone(&self) -> Self { self.as_ref().clone_box() }
 }
-
 impl std::fmt::Debug for dyn Callback {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Clonable Closure")
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Clonable Closure") }
 }

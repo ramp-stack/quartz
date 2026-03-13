@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 impl Canvas {
     pub fn new(_ctx: &mut Context, mode: CanvasMode) -> Self {
-        let virtual_res = mode.virtual_resolution();
+        let virtual_res = mode.virtual_resolution().unwrap_or((0.0, 0.0));
         Self {
             layout: CanvasLayout {
                 offsets: Vec::new(),
@@ -28,6 +28,12 @@ impl Canvas {
             key_release_callbacks: Vec::new(),
             scene_manager: SceneManager::new(),
             active_camera: None,
+            mouse_position: None,
+            hovered_indices: HashSet::new(),
+            mouse_press_callbacks: Vec::new(),
+            mouse_release_callbacks: Vec::new(),
+            mouse_move_callbacks: Vec::new(),
+            mouse_scroll_callbacks: Vec::new(),
         }
     }
 
@@ -61,6 +67,14 @@ impl Canvas {
 
             self.name_to_index.remove(&removed_name);
             self.id_to_index.remove(&removed_obj.id);
+
+            self.hovered_indices.remove(&idx);
+            let updated: HashSet<usize> = self
+                .hovered_indices
+                .drain()
+                .map(|i| if i > idx { i - 1 } else { i })
+                .collect();
+            self.hovered_indices = updated;
 
             for tag in &removed_obj.tags {
                 if let Some(indices) = self.tag_to_indices.get_mut(tag) {
@@ -177,9 +191,7 @@ impl Canvas {
 
         indices1.iter().any(|&idx1| {
             indices2.iter().any(|&idx2| {
-                if idx1 == idx2 {
-                    return false;
-                }
+                if idx1 == idx2 { return false; }
                 match (self.objects.get(idx1), self.objects.get(idx2)) {
                     (Some(obj1), Some(obj2)) => Self::check_collision(obj1, obj2),
                     _ => false,
@@ -241,8 +253,7 @@ impl Canvas {
     }
 
     pub fn get_game_object(&self, name: &str) -> Option<&GameObject> {
-        self.name_to_index.get(name)
-            .and_then(|&idx| self.objects.get(idx))
+        self.name_to_index.get(name).and_then(|&idx| self.objects.get(idx))
     }
 
     pub fn get_game_object_mut(&mut self, name: &str) -> Option<&mut GameObject> {

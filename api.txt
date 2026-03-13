@@ -1,0 +1,243 @@
+============================================================
+CANVAS
+============================================================
+
+Canvas::new(ctx: &mut Context, mode: CanvasMode) -> Self
+Canvas::add_game_object(&mut self, name: String, game_obj: GameObject)
+Canvas::remove_game_object(&mut self, name: &str)
+Canvas::get_game_object(&self, name: &str) -> Option<&GameObject>
+Canvas::get_game_object_mut(&mut self, name: &str) -> Option<&mut GameObject>
+Canvas::run(&mut self, action: Action)
+Canvas::add_event(&mut self, event: GameEvent, target: Target)
+Canvas::collision_between(&self, target1: &Target, target2: &Target) -> bool
+Canvas::objects_in_radius(&self, game_object: &GameObject, radius_px: f32) -> Vec<&GameObject>
+Canvas::handle_infinite_scroll(&mut self)
+Canvas::get_virtual_size(&self) -> (f32, f32)
+Canvas::on_tick<F>(&mut self, callback: F)  where F: FnMut(&mut Canvas) + Clone + 'static
+Canvas::on_key_press(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+Canvas::on_key_release(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+Canvas::on_mouse_press(&mut self, cb: impl FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static)
+Canvas::on_mouse_release(&mut self, cb: impl FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static)
+Canvas::on_mouse_move(&mut self, cb: impl FnMut(&mut Canvas, (f32, f32)) + Clone + 'static)
+Canvas::on_mouse_scroll(&mut self, cb: impl FnMut(&mut Canvas, (f32, f32)) + Clone + 'static)
+Canvas::mouse_position(&self) -> Option<(f32, f32)>
+Canvas::is_key_held(&self, key: &Key) -> bool
+Canvas::play_sound(&self, file_path: &str)
+Canvas::set_camera(&mut self, camera: Camera)
+Canvas::clear_camera(&mut self)
+Canvas::camera(&self) -> Option<&Camera>
+Canvas::camera_mut(&mut self) -> Option<&mut Camera>
+Canvas::register_custom_event<F>(&mut self, name: String, handler: F)  where F: FnMut(&mut Canvas) + Clone + 'static
+Canvas::add_scene(&mut self, scene: Scene)
+Canvas::load_scene(&mut self, name: &str)
+Canvas::active_scene(&self) -> Option<&str>
+Canvas::is_scene(&self, name: &str) -> bool
+Canvas::screen_to_virtual(&self, screen_pos: (f32, f32)) -> (f32, f32)
+
+============================================================
+CANVAS MODE
+============================================================
+
+CanvasMode::Landscape
+CanvasMode::Portrait
+CanvasMode::Fullscreen
+
+============================================================
+GAME OBJECT
+============================================================
+
+GameObject::new(ctx, id: String, drawable: Option<impl Drawable + 'static>, size: f32, position: (f32, f32), tags: Vec<String>, momentum: (f32, f32), resistance: (f32, f32), gravity: f32) -> Self
+GameObject::new_rect(ctx, id: String, drawable: Option<impl Drawable + 'static>, size: (f32, f32), position: (f32, f32), tags: Vec<String>, momentum: (f32, f32), resistance: (f32, f32), gravity: f32) -> Self
+GameObject::with_animation(self, animated_sprite: AnimatedSprite) -> Self
+GameObject::with_image(self, image: Image) -> Self
+GameObject::as_platform(self) -> Self
+GameObject::with_tag(self, tag: impl Into<String>) -> Self
+GameObject::with_tags(self, tags: Vec<String>) -> Self
+GameObject::with_gravity(self, gravity: f32) -> Self
+GameObject::with_momentum(self, momentum: (f32, f32)) -> Self
+GameObject::with_resistance(self, resistance: (f32, f32)) -> Self
+GameObject::set_gravity(&mut self, gravity: f32)
+GameObject::set_animation(&mut self, animated_sprite: AnimatedSprite)
+GameObject::set_image(&mut self, image: Image)
+GameObject::update_position(&mut self)
+GameObject::apply_gravity(&mut self)
+GameObject::apply_resistance(&mut self)
+GameObject::update_animation(&mut self, delta_time: f32)
+GameObject::update_image_shape(&mut self)
+GameObject::check_boundary_collision(&self, canvas_size: (f32, f32)) -> bool
+GameObject::get_anchor_position(&self, anchor: Anchor) -> (f32, f32)
+GameObject::contains_point(&self, point: (f32, f32)) -> bool
+
+Fields:
+  id: String
+  tags: Vec<String>
+  size: (f32, f32)
+  position: (f32, f32)
+  momentum: (f32, f32)
+  resistance: (f32, f32)
+  gravity: f32
+  is_platform: bool
+  visible: bool
+  animated_sprite: Option<AnimatedSprite>
+
+============================================================
+TARGET
+============================================================
+
+Target::ByName(String)
+Target::ById(String)
+Target::ByTag(String)
+Target::name(s: impl Into<String>) -> Self
+Target::id(s: impl Into<String>) -> Self
+Target::tag(s: impl Into<String>) -> Self
+
+============================================================
+LOCATION
+============================================================
+
+Location::Position((f32, f32))
+Location::Between(Box<Target>, Box<Target>)
+Location::AtTarget(Box<Target>)
+Location::Relative { target: Box<Target>, offset: (f32, f32) }
+Location::OnTarget { target: Box<Target>, anchor: Anchor, offset: (f32, f32) }
+Location::at(x: f32, y: f32) -> Self
+
+============================================================
+ANCHOR
+============================================================
+
+Anchor { x: f32, y: f32 }
+
+============================================================
+ACTION
+============================================================
+
+Action::ApplyMomentum { target: Target, value: (f32, f32) }
+Action::SetMomentum { target: Target, value: (f32, f32) }
+Action::SetResistance { target: Target, value: (f32, f32) }
+Action::Remove { target: Target }
+Action::Spawn { object: Box<GameObject>, location: Location }
+Action::TransferMomentum { from: Target, to: Target, scale: f32 }
+Action::SetAnimation { target: Target, animation_bytes: &'static [u8], fps: f32 }
+Action::Teleport { target: Target, location: Location }
+Action::Show { target: Target }
+Action::Hide { target: Target }
+Action::Toggle { target: Target }
+Action::Conditional { condition: Condition, if_true: Box<Action>, if_false: Option<Box<Action>> }
+Action::Custom { name: String }
+
+============================================================
+CONDITION
+============================================================
+
+Condition::Always
+Condition::KeyHeld(Key)
+Condition::KeyNotHeld(Key)
+Condition::Collision(Target)
+Condition::NoCollision(Target)
+Condition::And(Box<Condition>, Box<Condition>)
+Condition::Or(Box<Condition>, Box<Condition>)
+Condition::Not(Box<Condition>)
+Condition::IsVisible(Target)
+Condition::IsHidden(Target)
+
+============================================================
+GAME EVENT
+============================================================
+
+GameEvent::Collision { action: Action, target: Target }
+GameEvent::BoundaryCollision { action: Action, target: Target }
+GameEvent::KeyPress { key: Key, action: Action, target: Target }
+GameEvent::KeyRelease { key: Key, action: Action, target: Target }
+GameEvent::KeyHold { key: Key, action: Action, target: Target }
+GameEvent::Tick { action: Action, target: Target }
+GameEvent::Custom { name: String, target: Target }
+GameEvent::MousePress { action: Action, target: Target, button: Option<MouseButton> }
+GameEvent::MouseRelease { action: Action, target: Target, button: Option<MouseButton> }
+GameEvent::MouseEnter { action: Action, target: Target }
+GameEvent::MouseLeave { action: Action, target: Target }
+GameEvent::MouseOver { action: Action, target: Target }
+GameEvent::MouseScroll { action: Action, target: Target, axis: Option<ScrollAxis> }
+GameEvent::MouseMove { action: Action, target: Target }
+
+GameEvent::is_key_press(&self) -> bool
+GameEvent::is_key_release(&self) -> bool
+GameEvent::is_key_hold(&self) -> bool
+GameEvent::is_tick(&self) -> bool
+GameEvent::is_custom(&self) -> bool
+GameEvent::is_mouse_press(&self) -> bool
+GameEvent::is_mouse_release(&self) -> bool
+GameEvent::is_mouse_enter(&self) -> bool
+GameEvent::is_mouse_leave(&self) -> bool
+GameEvent::is_mouse_over(&self) -> bool
+GameEvent::is_mouse_scroll(&self) -> bool
+GameEvent::is_mouse_move(&self) -> bool
+GameEvent::key(&self) -> Option<&Key>
+GameEvent::action(&self) -> &Action
+GameEvent::custom_name(&self) -> Option<&str>
+
+============================================================
+MOUSE BUTTON
+============================================================
+
+MouseButton::Left
+MouseButton::Right
+MouseButton::Middle
+
+============================================================
+SCROLL AXIS
+============================================================
+
+ScrollAxis::Up
+ScrollAxis::Down
+ScrollAxis::Left
+ScrollAxis::Right
+
+============================================================
+ANIMATED SPRITE
+============================================================
+
+AnimatedSprite::new(gif_bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String>
+AnimatedSprite::from_frames(frames: Vec<RgbaImage>, size: (f32, f32), fps: f32) -> Self
+AnimatedSprite::update(&mut self, delta_time: f32)
+AnimatedSprite::get_current_image(&self) -> Image
+AnimatedSprite::set_fps(&mut self, fps: f32)
+AnimatedSprite::reset(&mut self)
+AnimatedSprite::frame_count(&self) -> usize
+AnimatedSprite::set_frame(&mut self, frame: usize)
+
+============================================================
+CAMERA
+============================================================
+
+Camera::new(world_size: (f32, f32), viewport_size: (f32, f32)) -> Self
+Camera::follow(&mut self, target: Option<Target>)
+Camera::center_on(&mut self, wx: f32, wy: f32)
+Camera::lerp_toward(&mut self, wx: f32, wy: f32)  [pub(crate)]
+
+Fields:
+  position: (f32, f32)
+  world_size: (f32, f32)
+  lerp_speed: f32
+
+============================================================
+SCENE
+============================================================
+
+Scene::new(name: impl Into<String>) -> Self
+Scene::with_object(self, name: impl Into<String>, obj: GameObject) -> Self
+Scene::with_event(self, event: GameEvent, target: Target) -> Self
+Scene::on_enter<F>(self, f: F) -> Self  where F: FnMut(&mut Canvas) + Clone + 'static
+Scene::on_exit<F>(self, f: F) -> Self   where F: FnMut(&mut Canvas) + Clone + 'static
+
+Fields:
+  name: String
+
+============================================================
+SCENE MANAGER
+============================================================
+
+SceneManager::new() -> Self
+SceneManager::add_scene(&mut self, scene: Scene)
+SceneManager::active_scene(&self) -> Option<&str>
+SceneManager::has_scene(&self, name: &str) -> bool
