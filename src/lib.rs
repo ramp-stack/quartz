@@ -16,6 +16,7 @@ mod apis;
 mod scene;
 mod camera;
 mod mouse;
+mod value;
 
 pub use game_object::{
     GameObject, Action, Target, Location, GameEvent, Condition, Anchor,
@@ -25,6 +26,8 @@ pub use animation::AnimatedSprite;
 pub use scene::{Scene, SceneManager};
 pub use camera::Camera;
 pub use mouse::{MouseCallback, MouseMoveCallback, MouseScrollCallback};
+pub use value::{Value, ComparisonOperator, MathOperator};
+pub use value::{compare_operands, resolve_value, apply_op};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
@@ -128,6 +131,7 @@ pub struct Canvas {
     #[skip] mouse_release_callbacks: Vec<Box<dyn MouseCallback>>,
     #[skip] mouse_move_callbacks: Vec<Box<dyn MouseMoveCallback>>,
     #[skip] mouse_scroll_callbacks: Vec<Box<dyn MouseScrollCallback>>,
+    #[skip] pub game_vars: HashMap<String, Value>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -439,6 +443,13 @@ impl Canvas {
                 self.get_target_indices(target).iter()
                     .any(|&idx| self.objects.get(idx).map_or(true, |obj| !obj.visible))
             }
+            Condition::Compare(left, op, right) => {
+                match (resolve_value(left, &self.game_vars), resolve_value(right, &self.game_vars)) {
+                    (Some(l), Some(r)) => compare_operands(&l, op, &r).unwrap_or(false),
+                    _ => false,
+                }
+            }
+            Condition::VarExists(name) => self.game_vars.contains_key(name),
         }
     }
 

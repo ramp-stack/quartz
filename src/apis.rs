@@ -34,6 +34,7 @@ impl Canvas {
             mouse_release_callbacks: Vec::new(),
             mouse_move_callbacks: Vec::new(),
             mouse_scroll_callbacks: Vec::new(),
+            game_vars: HashMap::new(),
         }
     }
 
@@ -173,6 +174,25 @@ impl Canvas {
                     self.custom_event_handlers.insert(name, handler);
                 }
             }
+            Action::Multi(actions) => {
+                for act in actions {
+                    self.run(act);
+                }
+            }
+            Action::SetVar { name, value } => {
+                if let Some(resolved) = resolve_value(&value, &self.game_vars) {
+                    self.game_vars.insert(name, resolved);
+                }
+            }
+            Action::ModVar { name, op, value } => {
+                if let Some(current) = self.game_vars.get(&name).cloned() {
+                    if let Some(rhs) = resolve_value(&value, &self.game_vars) {
+                        if let Some(result) = apply_op(&current, &op, &rhs) {
+                            self.game_vars.insert(name, result);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -278,5 +298,102 @@ impl Canvas {
                 }
             }
         });
+    }
+    // ── Game Variable Helpers ──────────────────────────────────────────
+
+    pub fn set_var(&mut self, name: impl Into<String>, value: Value) {
+        self.game_vars.insert(name.into(), value);
+    }
+
+    pub fn get_var(&self, name: &str) -> Option<&Value> {
+        self.game_vars.get(name)
+    }
+
+    pub fn get_var_cloned(&self, name: &str) -> Option<Value> {
+        self.game_vars.get(name).cloned()
+    }
+
+    pub fn has_var(&self, name: &str) -> bool {
+        self.game_vars.contains_key(name)
+    }
+
+    pub fn remove_var(&mut self, name: &str) {
+        self.game_vars.remove(name);
+    }
+
+    pub fn resolve_value(&self, value: Value) -> Option<Value> {
+        resolve_value(&value, &self.game_vars)
+    }
+
+    pub fn get_u32(&self, name: &str) -> Option<u32> {
+        match self.game_vars.get(name) {
+            Some(Value::U32(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_i32(&self, name: &str) -> Option<i32> {
+        match self.game_vars.get(name) {
+            Some(Value::I32(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_f32(&self, name: &str) -> Option<f32> {
+        match self.game_vars.get(name) {
+            Some(Value::F32(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_f64(&self, name: &str) -> Option<f64> {
+        match self.game_vars.get(name) {
+            Some(Value::F64(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_bool(&self, name: &str) -> Option<bool> {
+        match self.game_vars.get(name) {
+            Some(Value::Bool(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn get_usize(&self, name: &str) -> Option<usize> {
+        match self.game_vars.get(name) {
+            Some(Value::Usize(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn modify_var(&mut self, name: &str, f: impl FnOnce(Value) -> Value) {
+        if let Some(current) = self.game_vars.remove(name) {
+            self.game_vars.insert(name.to_string(), f(current));
+        }
+    }
+
+    pub fn modify_u32(&mut self, name: &str, f: impl FnOnce(u32) -> u32) {
+        self.modify_var(name, |v| match v { Value::U32(n) => Value::U32(f(n)), other => other });
+    }
+
+    pub fn modify_i32(&mut self, name: &str, f: impl FnOnce(i32) -> i32) {
+        self.modify_var(name, |v| match v { Value::I32(n) => Value::I32(f(n)), other => other });
+    }
+
+    pub fn modify_f32(&mut self, name: &str, f: impl FnOnce(f32) -> f32) {
+        self.modify_var(name, |v| match v { Value::F32(n) => Value::F32(f(n)), other => other });
+    }
+
+    pub fn modify_f64(&mut self, name: &str, f: impl FnOnce(f64) -> f64) {
+        self.modify_var(name, |v| match v { Value::F64(n) => Value::F64(f(n)), other => other });
+    }
+
+    pub fn modify_bool(&mut self, name: &str, f: impl FnOnce(bool) -> bool) {
+        self.modify_var(name, |v| match v { Value::Bool(b) => Value::Bool(f(b)), other => other });
+    }
+    
+    pub fn modify_usize(&mut self, name: &str, f: impl FnOnce(usize) -> usize) {
+        self.modify_var(name, |v| match v { Value::Usize(n) => Value::Usize(f(n)), other => other });
     }
 }

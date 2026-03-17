@@ -8,6 +8,7 @@ use prism::display::Opt;
 use std::cell::Cell;
 
 use crate::animation::AnimatedSprite;
+use crate::value::{Value, ComparisonOperator, MathOperator};
 
 #[derive(Debug, Clone)]
 pub enum Target {
@@ -70,6 +71,8 @@ pub enum Condition {
     Not(Box<Condition>),
     IsVisible(Target),
     IsHidden(Target),
+    Compare(Value, ComparisonOperator, Value),
+    VarExists(String),
 }
 
 #[derive(Clone, Debug)]
@@ -123,6 +126,16 @@ pub enum Action {
     },
     Custom {
         name: String,
+    },
+    Multi(Vec<Action>),
+    SetVar {
+        name: String,
+        value: Value,
+    },
+    ModVar {
+        name: String,
+        op: MathOperator,
+        value: Value,
     },
 }
 
