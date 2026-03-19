@@ -1,10 +1,18 @@
+use std::collections::HashSet;
 use crate::{Canvas, MouseButton, ScrollAxis};
 use crate::game_object::GameEvent;
+
+// ---------------------------------------------------------------------------
+// Callback traits
+// ---------------------------------------------------------------------------
 
 pub trait MouseCallback: FnMut(&mut Canvas, MouseButton, (f32, f32)) + 'static {
     fn clone_box(&self) -> Box<dyn MouseCallback>;
 }
-impl<F> MouseCallback for F where F: FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static {
+impl<F> MouseCallback for F
+where
+    F: FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static,
+{
     fn clone_box(&self) -> Box<dyn MouseCallback> { Box::new(self.clone()) }
 }
 impl Clone for Box<dyn MouseCallback> {
@@ -14,7 +22,10 @@ impl Clone for Box<dyn MouseCallback> {
 pub trait MouseMoveCallback: FnMut(&mut Canvas, (f32, f32)) + 'static {
     fn clone_box(&self) -> Box<dyn MouseMoveCallback>;
 }
-impl<F> MouseMoveCallback for F where F: FnMut(&mut Canvas, (f32, f32)) + Clone + 'static {
+impl<F> MouseMoveCallback for F
+where
+    F: FnMut(&mut Canvas, (f32, f32)) + Clone + 'static,
+{
     fn clone_box(&self) -> Box<dyn MouseMoveCallback> { Box::new(self.clone()) }
 }
 impl Clone for Box<dyn MouseMoveCallback> {
@@ -24,59 +35,104 @@ impl Clone for Box<dyn MouseMoveCallback> {
 pub trait MouseScrollCallback: FnMut(&mut Canvas, (f32, f32)) + 'static {
     fn clone_box(&self) -> Box<dyn MouseScrollCallback>;
 }
-impl<F> MouseScrollCallback for F where F: FnMut(&mut Canvas, (f32, f32)) + Clone + 'static {
+impl<F> MouseScrollCallback for F
+where
+    F: FnMut(&mut Canvas, (f32, f32)) + Clone + 'static,
+{
     fn clone_box(&self) -> Box<dyn MouseScrollCallback> { Box::new(self.clone()) }
 }
 impl Clone for Box<dyn MouseScrollCallback> {
     fn clone(&self) -> Self { self.as_ref().clone_box() }
 }
 
+// ---------------------------------------------------------------------------
+// MouseState — owned by Canvas
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+pub struct MouseState {
+    pub position:          Option<(f32, f32)>,
+    pub hovered_indices:   HashSet<usize>,
+    pub press_callbacks:   Vec<Box<dyn MouseCallback>>,
+    pub release_callbacks: Vec<Box<dyn MouseCallback>>,
+    pub move_callbacks:    Vec<Box<dyn MouseMoveCallback>>,
+    pub scroll_callbacks:  Vec<Box<dyn MouseScrollCallback>>,
+}
+
+impl Clone for MouseState {
+    fn clone(&self) -> Self {
+        Self {
+            position:          self.position,
+            hovered_indices:   self.hovered_indices.clone(),
+            press_callbacks:   self.press_callbacks.clone(),
+            release_callbacks: self.release_callbacks.clone(),
+            move_callbacks:    self.move_callbacks.clone(),
+            scroll_callbacks:  self.scroll_callbacks.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for MouseState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MouseState")
+            .field("position", &self.position)
+            .field("hovered_count", &self.hovered_indices.len())
+            .finish()
+    }
+}
+
+impl MouseState {
+    pub fn new() -> Self { Self::default() }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas mouse API
+// ---------------------------------------------------------------------------
+
 impl Canvas {
     pub fn on_mouse_press(
         &mut self,
         cb: impl FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static,
     ) {
-        self.mouse_press_callbacks.push(Box::new(cb));
+        self.mouse.press_callbacks.push(Box::new(cb));
     }
 
     pub fn on_mouse_release(
         &mut self,
         cb: impl FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static,
     ) {
-        self.mouse_release_callbacks.push(Box::new(cb));
+        self.mouse.release_callbacks.push(Box::new(cb));
     }
 
     pub fn on_mouse_move(
         &mut self,
         cb: impl FnMut(&mut Canvas, (f32, f32)) + Clone + 'static,
     ) {
-        self.mouse_move_callbacks.push(Box::new(cb));
+        self.mouse.move_callbacks.push(Box::new(cb));
     }
 
     pub fn on_mouse_scroll(
         &mut self,
         cb: impl FnMut(&mut Canvas, (f32, f32)) + Clone + 'static,
     ) {
-        self.mouse_scroll_callbacks.push(Box::new(cb));
+        self.mouse.scroll_callbacks.push(Box::new(cb));
     }
 
     pub fn mouse_position(&self) -> Option<(f32, f32)> {
-        self.mouse_position
+        self.mouse.position
     }
 
     pub(crate) fn handle_mouse_event(&mut self, evt: prism::event::MouseEvent) {
-        use prism::event::MouseState;
+        use prism::event::MouseState as PrismMouseState;
 
         let screen_pos = match evt.position {
             Some(p) => p,
             None => {
-                if !self.hovered_indices.is_empty() {
-                    let leaving: Vec<usize> = self.hovered_indices.drain().collect();
-                    for idx in leaving {
-                        self.trigger_mouse_leave_events(idx);
-                    }
+                let leaving: Vec<usize> = self.mouse.hovered_indices.drain().collect();
+                for idx in leaving {
+                    self.trigger_mouse_leave_events(idx);
                 }
-                self.mouse_position = None;
+                self.mouse.position = None;
                 return;
             }
         };
@@ -84,95 +140,101 @@ impl Canvas {
         let vpos = self.screen_to_virtual(screen_pos);
 
         match evt.state {
-            MouseState::Pressed => {
-                self.mouse_position = Some(vpos);
+            PrismMouseState::Pressed => {
+                self.mouse.position = Some(vpos);
                 let btn = MouseButton::Left;
 
-                let mut cbs = std::mem::take(&mut self.mouse_press_callbacks);
-                for cb in cbs.iter_mut() {
-                    cb(self, btn, vpos);
-                }
-                self.mouse_press_callbacks = cbs;
+                let mut cbs = std::mem::take(&mut self.mouse.press_callbacks);
+                for cb in cbs.iter_mut() { cb(self, btn, vpos); }
+                self.mouse.press_callbacks = cbs;
 
                 self.process_mouse_press_events(vpos, btn);
             }
 
-            MouseState::Released => {
-                self.mouse_position = Some(vpos);
+            PrismMouseState::Released => {
+                self.mouse.position = Some(vpos);
                 let btn = MouseButton::Left;
 
-                let mut cbs = std::mem::take(&mut self.mouse_release_callbacks);
-                for cb in cbs.iter_mut() {
-                    cb(self, btn, vpos);
-                }
-                self.mouse_release_callbacks = cbs;
+                let mut cbs = std::mem::take(&mut self.mouse.release_callbacks);
+                for cb in cbs.iter_mut() { cb(self, btn, vpos); }
+                self.mouse.release_callbacks = cbs;
 
                 self.process_mouse_release_events(vpos, btn);
             }
 
-            MouseState::Moved => {
-                self.mouse_position = Some(vpos);
+            PrismMouseState::Moved => {
+                self.mouse.position = Some(vpos);
 
-                let mut cbs = std::mem::take(&mut self.mouse_move_callbacks);
-                for cb in cbs.iter_mut() {
-                    cb(self, vpos);
-                }
-                self.mouse_move_callbacks = cbs;
+                let mut cbs = std::mem::take(&mut self.mouse.move_callbacks);
+                for cb in cbs.iter_mut() { cb(self, vpos); }
+                self.mouse.move_callbacks = cbs;
+
                 self.process_mouse_move_events(vpos);
                 self.update_hover_state(vpos);
             }
 
-            MouseState::Scroll(dx, dy) => {
-                let delta = (dx, dy);
-                let mut cbs = std::mem::take(&mut self.mouse_scroll_callbacks);
-                for cb in cbs.iter_mut() {
-                    cb(self, delta);
-                }
-                self.mouse_scroll_callbacks = cbs;
+            PrismMouseState::Scroll(dx, dy) => {
+                let mut cbs = std::mem::take(&mut self.mouse.scroll_callbacks);
+                for cb in cbs.iter_mut() { cb(self, (dx, dy)); }
+                self.mouse.scroll_callbacks = cbs;
+
                 self.process_mouse_scroll_events(vpos, dx, dy);
             }
         }
     }
 
     pub(crate) fn objects_under_cursor(&self, vpos: (f32, f32)) -> Vec<usize> {
-        (0..self.objects.len())
+        (0..self.store.objects.len())
             .filter(|&idx| {
-                self.objects[idx].visible && self.objects[idx].contains_point(vpos)
+                self.store.objects[idx].visible
+                    && self.store.objects[idx].contains_point(vpos)
             })
             .collect()
     }
 
     pub(crate) fn update_hover_state(&mut self, vpos: (f32, f32)) {
-        use std::collections::HashSet;
+        let now_hovered: HashSet<usize> =
+            self.objects_under_cursor(vpos).into_iter().collect();
 
-        let now_hovered: HashSet<usize> = self.objects_under_cursor(vpos).into_iter().collect();
-
-        let entered: Vec<usize> = now_hovered.difference(&self.hovered_indices).copied().collect();
+        let entered: Vec<usize> = now_hovered
+            .difference(&self.mouse.hovered_indices)
+            .copied()
+            .collect();
         for idx in entered {
             self.trigger_mouse_enter_events(idx);
         }
 
-        let left: Vec<usize> = self.hovered_indices.difference(&now_hovered).copied().collect();
+        let left: Vec<usize> = self.mouse.hovered_indices
+            .difference(&now_hovered)
+            .copied()
+            .collect();
         for idx in left {
             self.trigger_mouse_leave_events(idx);
         }
 
-        self.hovered_indices = now_hovered;
+        self.mouse.hovered_indices = now_hovered;
     }
 
-    pub(crate) fn process_mouse_press_events(&mut self, vpos: (f32, f32), pressed_btn: MouseButton) {
+    pub(crate) fn process_mouse_press_events(
+        &mut self,
+        vpos: (f32, f32),
+        pressed_btn: MouseButton,
+    ) {
         let actions: Vec<_> = self
             .objects_under_cursor(vpos)
             .into_iter()
             .flat_map(|idx| {
-                self.object_events
+                self.store.events
                     .get(idx)
                     .into_iter()
                     .flatten()
                     .filter_map(|e| {
                         if let GameEvent::MousePress { action, button, .. } = e {
-                            let matches = button.map_or(true, |b| b == pressed_btn);
-                            if matches { Some(action.clone()) } else { None }
+                            if button.map_or(true, |b| b == pressed_btn) {
+                                Some(action.clone())
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -180,23 +242,29 @@ impl Canvas {
                     .collect::<Vec<_>>()
             })
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
-    pub(crate) fn process_mouse_release_events(&mut self, vpos: (f32, f32), released_btn: MouseButton) {
+    pub(crate) fn process_mouse_release_events(
+        &mut self,
+        vpos: (f32, f32),
+        released_btn: MouseButton,
+    ) {
         let actions: Vec<_> = self
             .objects_under_cursor(vpos)
             .into_iter()
             .flat_map(|idx| {
-                self.object_events
+                self.store.events
                     .get(idx)
                     .into_iter()
                     .flatten()
                     .filter_map(|e| {
                         if let GameEvent::MouseRelease { action, button, .. } = e {
-                            let matches = button.map_or(true, |b| b == released_btn);
-                            if matches { Some(action.clone()) } else { None }
+                            if button.map_or(true, |b| b == released_btn) {
+                                Some(action.clone())
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -204,7 +272,6 @@ impl Canvas {
                     .collect::<Vec<_>>()
             })
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
@@ -213,7 +280,7 @@ impl Canvas {
             .objects_under_cursor(vpos)
             .into_iter()
             .flat_map(|idx| {
-                self.object_events
+                self.store.events
                     .get(idx)
                     .into_iter()
                     .flatten()
@@ -227,7 +294,6 @@ impl Canvas {
                     .collect::<Vec<_>>()
             })
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
@@ -236,7 +302,7 @@ impl Canvas {
             .objects_under_cursor(vpos)
             .into_iter()
             .flat_map(|idx| {
-                self.object_events
+                self.store.events
                     .get(idx)
                     .into_iter()
                     .flatten()
@@ -250,27 +316,31 @@ impl Canvas {
                     .collect::<Vec<_>>()
             })
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
-    pub(crate) fn process_mouse_scroll_events(&mut self, vpos: (f32, f32), dx: f32, dy: f32) {
+    pub(crate) fn process_mouse_scroll_events(
+        &mut self,
+        vpos: (f32, f32),
+        dx: f32,
+        dy: f32,
+    ) {
         let actions: Vec<_> = self
             .objects_under_cursor(vpos)
             .into_iter()
             .flat_map(|idx| {
-                self.object_events
+                self.store.events
                     .get(idx)
                     .into_iter()
                     .flatten()
                     .filter_map(|e| {
                         if let GameEvent::MouseScroll { action, axis, .. } = e {
                             let matches = match axis {
-                                None => true,
-                                Some(ScrollAxis::Up) => dy < 0.0,
-                                Some(ScrollAxis::Down) => dy > 0.0,
-                                Some(ScrollAxis::Left) => dx < 0.0,
-                                Some(ScrollAxis::Right) => dx > 0.0,
+                                None                     => true,
+                                Some(ScrollAxis::Up)     => dy < 0.0,
+                                Some(ScrollAxis::Down)   => dy > 0.0,
+                                Some(ScrollAxis::Left)   => dx < 0.0,
+                                Some(ScrollAxis::Right)  => dx > 0.0,
                             };
                             if matches { Some(action.clone()) } else { None }
                         } else {
@@ -280,13 +350,11 @@ impl Canvas {
                     .collect::<Vec<_>>()
             })
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
     pub(crate) fn trigger_mouse_enter_events(&mut self, idx: usize) {
-        let actions: Vec<_> = self
-            .object_events
+        let actions: Vec<_> = self.store.events
             .get(idx)
             .into_iter()
             .flatten()
@@ -302,8 +370,7 @@ impl Canvas {
     }
 
     pub(crate) fn trigger_mouse_leave_events(&mut self, idx: usize) {
-        let actions: Vec<_> = self
-            .object_events
+        let actions: Vec<_> = self.store.events
             .get(idx)
             .into_iter()
             .flatten()
