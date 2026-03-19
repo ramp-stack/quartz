@@ -174,6 +174,8 @@ impl Canvas {
                     self.custom_event_handlers.insert(name, handler);
                 }
             }
+            //=============================================
+            //synful additions
             Action::Multi(actions) => {
                 for act in actions {
                     self.run(act);
@@ -190,6 +192,24 @@ impl Canvas {
                         if let Some(result) = apply_op(&current, &op, &rhs) {
                             self.game_vars.insert(name, result);
                         }
+                    }
+                }
+            }
+            Action::PlaySound { path } => {
+                self.play_sound(&path);
+            }
+            Action::SetGravity { target, value }
+            => {
+                    self.apply_to_targets(&target, |obj| obj.gravity = value);
+            }
+            Action::SetSize { target, value } => {
+                let scale = self.layout.scale.get();
+                let indices = self.get_target_indices(&target);
+                for idx in indices {
+                    if let Some(obj) = self.objects.get_mut(idx) {
+                        obj.size = value;
+                        obj.scaled_size.set((value.0 * scale, value.1 * scale));
+                        obj.update_image_shape();
                     }
                 }
             }
@@ -367,6 +387,13 @@ impl Canvas {
         }
     }
 
+    pub fn get_str(&self, name: &str) -> Option<&str> {
+        match self.game_vars.get(name) {
+            Some(Value::Str(v)) => Some(v.as_str()),
+            _ => None,
+        }
+    }
+
     pub fn modify_var(&mut self, name: &str, f: impl FnOnce(Value) -> Value) {
         if let Some(current) = self.game_vars.remove(name) {
             self.game_vars.insert(name.to_string(), f(current));
@@ -396,4 +423,11 @@ impl Canvas {
     pub fn modify_usize(&mut self, name: &str, f: impl FnOnce(usize) -> usize) {
         self.modify_var(name, |v| match v { Value::Usize(n) => Value::Usize(f(n)), other => other });
     }
+
+    pub fn modify_str(&mut self, name: &str, f: impl FnOnce(String) -> String) {
+        self.modify_var(name, |v| match v {
+            Value::Str(s) => Value::Str(f(s)),
+            other => other,
+        });
+    }    
 }

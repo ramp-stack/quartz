@@ -35,7 +35,12 @@ pub enum Value {
     Add(Box<Value>, Box<Value>),  // left + right
     Sub(Box<Value>, Box<Value>),  // left - right
     Mul(Box<Value>, Box<Value>),  // left * right
-    Div(Box<Value>, Box<Value>),  // left / right    
+    Div(Box<Value>, Box<Value>),  // left / right
+    Str(String),                  // String literal
+    Format {
+        template: String,          // e.g., "Hello, {}!"
+        args: Vec<Value>,          // Arguments to fill in the template
+    },    
 }
 
 impl Value {
@@ -58,6 +63,29 @@ impl Value {
     pub fn div(a: Value, b: Value) -> Self {
         Value::Div(Box::new(a), Box::new(b))
     }
+
+    pub fn str(s: impl Into<String>) -> Self {
+        Value::Str(s.into())
+    }
+
+    pub fn to_display_string(&self) -> String {
+        match self {
+            Value::I8(v) => v.to_string(),
+            Value::U8(v) => v.to_string(),
+            Value::I16(v) => v.to_string(),
+            Value::U16(v) => v.to_string(),
+            Value::I32(v) => v.to_string(),
+            Value::U32(v) => v.to_string(),
+            Value::I64(v) => v.to_string(),
+            Value::U64(v) => v.to_string(),
+            Value::F32(v) => format!("{:.2}", v),
+            Value::F64(v) => format!("{:.2}", v),
+            Value::Usize(v) => v.to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Str(v) => v.clone(),
+            _ => "?".to_string(),                       
+        }
+    }    
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +97,7 @@ pub enum MathOperator {
 }
 pub fn resolve_value(value: &Value, vars: &HashMap<String,Value>) -> Option<Value> {
     match value {
-        Value::I8(_) | Value::U8(_) | Value::I16(_) | Value::U16(_) | Value::I32(_) | Value::U32(_) | Value::I64(_) | Value::U64(_) | Value::F32(_) | Value::F64(_) | Value::Usize(_) | Value::Bool(_) => {
+        Value::I8(_) | Value::U8(_) | Value::I16(_) | Value::U16(_) | Value::I32(_) | Value::U32(_) | Value::I64(_) | Value::U64(_) | Value::F32(_) | Value::F64(_) | Value::Usize(_) | Value::Bool(_) | Value::Str(_) => {
             Some(value.clone())
         }
         Value::Var(name) => vars.get(name).cloned(),
@@ -77,6 +105,15 @@ pub fn resolve_value(value: &Value, vars: &HashMap<String,Value>) -> Option<Valu
         Value::Sub(a, b) => compute_math(a, b, vars, &MathOperator::Sub),
         Value::Mul(a, b) => compute_math(a, b, vars, &MathOperator::Mul),
         Value::Div(a, b) => compute_math(a, b, vars, &MathOperator::Div),
+        Value::Format { template, args } => {
+            let mut result = template.clone();
+            for (i, arg) in args.iter().enumerate() {
+                if let Some(resolved) = resolve_value(arg, vars) {
+                    result = result.replace(&format!("{{{}}}", i), &resolved.to_display_string(),);
+                }
+            }
+            Some(Value::Str(result))
+        }
     }
 }
 
@@ -163,6 +200,10 @@ pub fn apply_op(left: &Value, op: &MathOperator, right: &Value) -> Option<Value>
                 return None; // Division by zero
             },
         }),
+        (Value::Str(l), Value::Str(r)) => Some(match op {
+            MathOperator::Add => Value::Str(format!("{}{}", l, r)),
+            _ => return None, // We can only add strings together
+        }),
         _ => None,
     }
 }
@@ -205,6 +246,11 @@ pub fn compare_operands(left: &Value, op: &ComparisonOperator, right: &Value) ->
             ComparisonOperator::Equal => l == r,
             ComparisonOperator::NotEqual => l != r,
             _ => false, // Only equality makes sense for bools
+        }),
+        (Value::Str(l), Value::Str(r)) => Some(match op {
+            ComparisonOperator::Equal => l == r,
+            ComparisonOperator::NotEqual => l != r,
+            _ => false, // Only equality makes sense for strings
         }),
         _ => None, // Type mismatch
     }

@@ -71,8 +71,11 @@ pub enum Condition {
     Not(Box<Condition>),
     IsVisible(Target),
     IsHidden(Target),
+    //===========================================
+    //synful additions
     Compare(Value, ComparisonOperator, Value),
     VarExists(String),
+    Grounded(Target),
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +130,8 @@ pub enum Action {
     Custom {
         name: String,
     },
+    //==========================================
+    //synful additions
     Multi(Vec<Action>),
     SetVar {
         name: String,
@@ -136,6 +141,17 @@ pub enum Action {
         name: String,
         op: MathOperator,
         value: Value,
+    },
+    PlaySound {
+        path: String,        
+    },
+    SetGravity {
+        target: Target,
+        value: f32,
+    },
+    SetSize {
+        target: Target,
+        value: (f32, f32),
     },
 }
 

@@ -443,6 +443,8 @@ impl Canvas {
                 self.get_target_indices(target).iter()
                     .any(|&idx| self.objects.get(idx).map_or(true, |obj| !obj.visible))
             }
+            //=================================================
+            //synful additions
             Condition::Compare(left, op, right) => {
                 match (resolve_value(left, &self.game_vars), resolve_value(right, &self.game_vars)) {
                     (Some(l), Some(r)) => compare_operands(&l, op, &r).unwrap_or(false),
@@ -450,6 +452,18 @@ impl Canvas {
                 }
             }
             Condition::VarExists(name) => self.game_vars.contains_key(name),
+            Condition::Grounded(target) => {
+                self.get_target_indices(target).iter().any(|&idx| {
+                    if let Some(obj) = self.objects.get(idx) {
+                        let obj_bottom = obj.position.1 + obj.size.1;
+                        self.objects.iter().any(|other| {
+                            other.is_platform && (obj_bottom - other.position.1).abs() < 2.0 && obj.position.0 + obj.size.0 > other.position.0 && obj.position.0 < other.position.0 + other.size.0 && obj.momentum.1 >= 0.0
+                        })
+                    } else {
+                        false                        
+                    }
+                })
+            }
         }
     }
 
