@@ -1,5 +1,6 @@
 use super::*;
 use super::sound::{SoundOptions, SoundHandle, spawn_sound};
+use crate::entropy::Entropy;
 use std::cell::Cell;
 
 use crate::game_object::{Location, Condition, GameEvent, Target};
@@ -7,6 +8,10 @@ use crate::object_store::ObjectStore;
 use crate::callbacks::CallbackStore;
 use crate::input::InputState;
 use crate::mouse::MouseState;
+
+// ---------------------------------------------------------------------------
+// Canvas impl
+// ---------------------------------------------------------------------------
 
 impl Canvas {
     pub fn new(_ctx: &mut Context, mode: CanvasMode) -> Self {
@@ -25,6 +30,7 @@ impl Canvas {
             callbacks:     CallbackStore::new(),
             scene_manager: SceneManager::new(),
             active_camera: None,
+            entropy:       Entropy::new(),
         }
     }
 
@@ -177,7 +183,6 @@ impl Canvas {
     pub fn camera(&self)     -> Option<&Camera>      { self.active_camera.as_ref() }
     pub fn camera_mut(&mut self) -> Option<&mut Camera> { self.active_camera.as_mut() }
 
-
     pub fn collision_between(&self, t1: &Target, t2: &Target) -> bool {
         let i1 = self.store.get_indices(t1);
         let i2 = self.store.get_indices(t2);
@@ -209,7 +214,6 @@ impl Canvas {
         self.layout.canvas_size.get()
     }
 
-
     pub fn play_sound(&self, file_path: &str) -> SoundHandle {
         spawn_sound(file_path, SoundOptions::default())
     }
@@ -217,6 +221,10 @@ impl Canvas {
     pub fn play_sound_with(&self, file_path: &str, options: SoundOptions) -> SoundHandle {
         spawn_sound(file_path, options)
     }
+
+    // -------------------------------------------------------------------------
+    // Internal
+    // -------------------------------------------------------------------------
 
     pub(crate) fn check_collision(o1: &GameObject, o2: &GameObject) -> bool {
         if !o1.visible || !o2.visible { return false; }
@@ -277,6 +285,9 @@ impl Canvas {
             if obj.animated_sprite.is_none() {
                 obj.update_image_shape();
             }
+
+            // Rebuild text with correct scaled font sizes every tick
+            obj.update_text_scale(scale);
 
             if obj.visible {
                 obj.apply_gravity();

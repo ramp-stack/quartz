@@ -1,243 +1,924 @@
-============================================================
-CANVAS
-============================================================
+================================================================================
+  GAME ENGINE — FULL PUBLIC API REFERENCE
+================================================================================
 
-Canvas::new(ctx: &mut Context, mode: CanvasMode) -> Self
-Canvas::add_game_object(&mut self, name: String, game_obj: GameObject)
-Canvas::remove_game_object(&mut self, name: &str)
-Canvas::get_game_object(&self, name: &str) -> Option<&GameObject>
-Canvas::get_game_object_mut(&mut self, name: &str) -> Option<&mut GameObject>
-Canvas::run(&mut self, action: Action)
-Canvas::add_event(&mut self, event: GameEvent, target: Target)
-Canvas::collision_between(&self, target1: &Target, target2: &Target) -> bool
-Canvas::objects_in_radius(&self, game_object: &GameObject, radius_px: f32) -> Vec<&GameObject>
-Canvas::handle_infinite_scroll(&mut self)
-Canvas::get_virtual_size(&self) -> (f32, f32)
-Canvas::on_tick<F>(&mut self, callback: F)  where F: FnMut(&mut Canvas) + Clone + 'static
-Canvas::on_key_press(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
-Canvas::on_key_release(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
-Canvas::on_mouse_press(&mut self, cb: impl FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static)
-Canvas::on_mouse_release(&mut self, cb: impl FnMut(&mut Canvas, MouseButton, (f32, f32)) + Clone + 'static)
-Canvas::on_mouse_move(&mut self, cb: impl FnMut(&mut Canvas, (f32, f32)) + Clone + 'static)
-Canvas::on_mouse_scroll(&mut self, cb: impl FnMut(&mut Canvas, (f32, f32)) + Clone + 'static)
-Canvas::mouse_position(&self) -> Option<(f32, f32)>
-Canvas::is_key_held(&self, key: &Key) -> bool
-Canvas::play_sound(&self, file_path: &str)
-Canvas::set_camera(&mut self, camera: Camera)
-Canvas::clear_camera(&mut self)
-Canvas::camera(&self) -> Option<&Camera>
-Canvas::camera_mut(&mut self) -> Option<&mut Camera>
-Canvas::register_custom_event<F>(&mut self, name: String, handler: F)  where F: FnMut(&mut Canvas) + Clone + 'static
-Canvas::add_scene(&mut self, scene: Scene)
-Canvas::load_scene(&mut self, name: &str)
-Canvas::active_scene(&self) -> Option<&str>
-Canvas::is_scene(&self, name: &str) -> bool
-Canvas::screen_to_virtual(&self, screen_pos: (f32, f32)) -> (f32, f32)
+--------------------------------------------------------------------------------
+  MODULE: Canvas  (canvas.rs / lib.rs)
+--------------------------------------------------------------------------------
 
-============================================================
-CANVAS MODE
-============================================================
+Canvas::new(ctx: &mut Context, mode: CanvasMode) -> Canvas
+  Creates a new Canvas instance.
+  Parameters:
+    ctx  - Mutable reference to the rendering context (unused, reserved for
+           future use).
+    mode - CanvasMode::Landscape | Portrait | Fullscreen. Controls the virtual
+           resolution and aspect ratio of the canvas.
+  Returns:
+    A fully initialised Canvas with empty object store, input, mouse, callback,
+    and scene manager state.
+  Implementation:
+    Calls mode.virtual_resolution() to derive the initial canvas_size cell.
+    Sets scale to 1.0 and safe_area_offset to (0,0). Constructs all sub-stores
+    (ObjectStore, InputState, MouseState, CallbackStore, SceneManager) via their
+    own ::new() constructors.
 
-CanvasMode::Landscape
-CanvasMode::Portrait
-CanvasMode::Fullscreen
+--------------------------------------------------------------------------------
 
-============================================================
-GAME OBJECT
-============================================================
+Canvas::key(name: &str) -> bool
+  Returns true if the named key is currently held down.
+  Parameters:
+    name - Human-readable key name: "left", "right", "up", "down", "space",
+           "enter", "tab", "del", or any single-character string (e.g. "a").
+  Returns:
+    bool — true if the key is in the held_keys set.
+  Implementation:
+    Maps the string to a Key::Named(NamedKey) or Key::Character variant, then
+    queries self.input.held_keys.contains(&k).
 
-GameObject::new(ctx, id: String, drawable: Option<impl Drawable + 'static>, size: f32, position: (f32, f32), tags: Vec<String>, momentum: (f32, f32), resistance: (f32, f32), gravity: f32) -> Self
-GameObject::new_rect(ctx, id: String, drawable: Option<impl Drawable + 'static>, size: (f32, f32), position: (f32, f32), tags: Vec<String>, momentum: (f32, f32), resistance: (f32, f32), gravity: f32) -> Self
-GameObject::with_animation(self, animated_sprite: AnimatedSprite) -> Self
-GameObject::with_image(self, image: Image) -> Self
-GameObject::as_platform(self) -> Self
-GameObject::with_tag(self, tag: impl Into<String>) -> Self
-GameObject::with_tags(self, tags: Vec<String>) -> Self
-GameObject::with_gravity(self, gravity: f32) -> Self
-GameObject::with_momentum(self, momentum: (f32, f32)) -> Self
-GameObject::with_resistance(self, resistance: (f32, f32)) -> Self
-GameObject::set_gravity(&mut self, gravity: f32)
-GameObject::set_animation(&mut self, animated_sprite: AnimatedSprite)
-GameObject::set_image(&mut self, image: Image)
-GameObject::update_position(&mut self)
-GameObject::apply_gravity(&mut self)
-GameObject::apply_resistance(&mut self)
-GameObject::update_animation(&mut self, delta_time: f32)
-GameObject::update_image_shape(&mut self)
-GameObject::check_boundary_collision(&self, canvas_size: (f32, f32)) -> bool
-GameObject::get_anchor_position(&self, anchor: Anchor) -> (f32, f32)
-GameObject::contains_point(&self, point: (f32, f32)) -> bool
+--------------------------------------------------------------------------------
 
-Fields:
-  id: String
-  tags: Vec<String>
-  size: (f32, f32)
-  position: (f32, f32)
-  momentum: (f32, f32)
-  resistance: (f32, f32)
-  gravity: f32
-  is_platform: bool
-  visible: bool
-  animated_sprite: Option<AnimatedSprite>
+Canvas::add_game_object(name: String, obj: GameObject)
+  Registers a new game object in the canvas.
+  Parameters:
+    name - Unique string name used to look up the object later.
+    obj  - The GameObject to add.
+  Returns: ()
+  Implementation:
+    Pushes obj.position into layout.offsets (keeps the layout vector in sync),
+    then calls self.store.add(name, obj).
 
-============================================================
-TARGET
-============================================================
+--------------------------------------------------------------------------------
 
-Target::ByName(String)
-Target::ById(String)
-Target::ByTag(String)
-Target::name(s: impl Into<String>) -> Self
-Target::id(s: impl Into<String>) -> Self
-Target::tag(s: impl Into<String>) -> Self
+Canvas::remove_game_object(name: &str)
+  Removes a named game object and cleans up all related state.
+  Parameters:
+    name - The name given when the object was added.
+  Returns: ()
+  Implementation:
+    Looks up the index via store.name_to_index. Removes it from
+    mouse.hovered_indices and re-numbers all remaining hover indices so they
+    stay consistent. Removes the offset from layout.offsets, then calls
+    self.store.remove(name).
 
-============================================================
-LOCATION
-============================================================
+--------------------------------------------------------------------------------
 
-Location::Position((f32, f32))
-Location::Between(Box<Target>, Box<Target>)
-Location::AtTarget(Box<Target>)
-Location::Relative { target: Box<Target>, offset: (f32, f32) }
-Location::OnTarget { target: Box<Target>, anchor: Anchor, offset: (f32, f32) }
-Location::at(x: f32, y: f32) -> Self
+Canvas::get_game_object(name: &str) -> Option<&GameObject>
+  Returns a shared reference to the named game object.
+  Parameters:
+    name - Object name.
+  Returns:
+    Some(&GameObject) if found, None otherwise.
+  Implementation:
+    Resolves the name to an index via store.name_to_index, then indexes into
+    store.objects.
 
-============================================================
-ANCHOR
-============================================================
+--------------------------------------------------------------------------------
 
-Anchor { x: f32, y: f32 }
+Canvas::get_game_object_mut(name: &str) -> Option<&mut GameObject>
+  Returns a mutable reference to the named game object.
+  Parameters:
+    name - Object name.
+  Returns:
+    Some(&mut GameObject) if found, None otherwise.
+  Implementation:
+    Same as get_game_object but uses get_mut for the final lookup.
 
-============================================================
-ACTION
-============================================================
+--------------------------------------------------------------------------------
 
-Action::ApplyMomentum { target: Target, value: (f32, f32) }
-Action::SetMomentum { target: Target, value: (f32, f32) }
-Action::SetResistance { target: Target, value: (f32, f32) }
-Action::Remove { target: Target }
-Action::Spawn { object: Box<GameObject>, location: Location }
-Action::TransferMomentum { from: Target, to: Target, scale: f32 }
-Action::SetAnimation { target: Target, animation_bytes: &'static [u8], fps: f32 }
-Action::Teleport { target: Target, location: Location }
-Action::Show { target: Target }
-Action::Hide { target: Target }
-Action::Toggle { target: Target }
-Action::Conditional { condition: Condition, if_true: Box<Action>, if_false: Option<Box<Action>> }
-Action::Custom { name: String }
+Canvas::run(action: Action)
+  Executes a game Action immediately on the canvas.
+  Parameters:
+    action - Any Action variant (see Action enum below).
+  Returns: ()
+  Implementation:
+    Large match block dispatching each Action variant:
+      ApplyMomentum   — adds value to each target's momentum tuple.
+      SetMomentum     — overwrites each target's momentum tuple.
+      SetResistance   — overwrites each target's resistance tuple.
+      Remove          — calls remove_game_object for every resolved name.
+      Spawn           — resolves the Location to a position, sets
+                        new_obj.position, generates a name "spawned_{id}", and
+                        calls add_game_object.
+      TransferMomentum— averages momentum over all `from` objects, scales it,
+                        and sets that value on all `to` objects.
+      SetAnimation    — creates an AnimatedSprite from bytes+fps for each
+                        target index and calls obj.set_animation().
+      Teleport        — resolves Location, sets obj.position and
+                        layout.offsets[idx].
+      Show/Hide/Toggle— sets obj.visible accordingly.
+      Conditional     — calls evaluate_condition; runs if_true or if_false.
+      Custom          — temporarily removes the named callback from the store,
+                        calls it with &mut self, then re-inserts it.
 
-============================================================
-CONDITION
-============================================================
+--------------------------------------------------------------------------------
 
-Condition::Always
-Condition::KeyHeld(Key)
-Condition::KeyNotHeld(Key)
-Condition::Collision(Target)
-Condition::NoCollision(Target)
-Condition::And(Box<Condition>, Box<Condition>)
-Condition::Or(Box<Condition>, Box<Condition>)
-Condition::Not(Box<Condition>)
-Condition::IsVisible(Target)
-Condition::IsHidden(Target)
+Canvas::add_event(event: GameEvent, target: Target)
+  Attaches a GameEvent to every object matched by target.
+  Parameters:
+    event  - The event descriptor (key press, collision, tick, mouse, …).
+    target - Which objects to attach the event to.
+  Returns: ()
+  Implementation:
+    Resolves target to indices, then pushes event.clone() into each
+    store.events[idx] vector.
 
-============================================================
-GAME EVENT
-============================================================
+--------------------------------------------------------------------------------
 
-GameEvent::Collision { action: Action, target: Target }
-GameEvent::BoundaryCollision { action: Action, target: Target }
-GameEvent::KeyPress { key: Key, action: Action, target: Target }
-GameEvent::KeyRelease { key: Key, action: Action, target: Target }
-GameEvent::KeyHold { key: Key, action: Action, target: Target }
-GameEvent::Tick { action: Action, target: Target }
-GameEvent::Custom { name: String, target: Target }
-GameEvent::MousePress { action: Action, target: Target, button: Option<MouseButton> }
-GameEvent::MouseRelease { action: Action, target: Target, button: Option<MouseButton> }
-GameEvent::MouseEnter { action: Action, target: Target }
-GameEvent::MouseLeave { action: Action, target: Target }
-GameEvent::MouseOver { action: Action, target: Target }
-GameEvent::MouseScroll { action: Action, target: Target, axis: Option<ScrollAxis> }
-GameEvent::MouseMove { action: Action, target: Target }
+Canvas::on_update<F>(callback: F)
+  Registers a callback to be called once every tick (frame).
+  Parameters:
+    callback - FnMut(&mut Canvas) + Clone + 'static
+  Returns: ()
+  Implementation:
+    Boxes the callback and appends it to callbacks.tick.
 
-GameEvent::is_key_press(&self) -> bool
-GameEvent::is_key_release(&self) -> bool
-GameEvent::is_key_hold(&self) -> bool
-GameEvent::is_tick(&self) -> bool
-GameEvent::is_custom(&self) -> bool
-GameEvent::is_mouse_press(&self) -> bool
-GameEvent::is_mouse_release(&self) -> bool
-GameEvent::is_mouse_enter(&self) -> bool
-GameEvent::is_mouse_leave(&self) -> bool
-GameEvent::is_mouse_over(&self) -> bool
-GameEvent::is_mouse_scroll(&self) -> bool
-GameEvent::is_mouse_move(&self) -> bool
-GameEvent::key(&self) -> Option<&Key>
-GameEvent::action(&self) -> &Action
-GameEvent::custom_name(&self) -> Option<&str>
+--------------------------------------------------------------------------------
 
-============================================================
-MOUSE BUTTON
-============================================================
+Canvas::register_custom_event<F>(name: String, handler: F)
+  Registers a named custom event handler.
+  Parameters:
+    name    - The string key used to trigger this handler via
+              Action::Custom { name } or GameEvent custom events.
+    handler - FnMut(&mut Canvas) + Clone + 'static
+  Returns: ()
+  Implementation:
+    Inserts the boxed handler into callbacks.custom HashMap.
 
-MouseButton::Left
-MouseButton::Right
-MouseButton::Middle
+--------------------------------------------------------------------------------
 
-============================================================
-SCROLL AXIS
-============================================================
+Canvas::set_camera(camera: Camera)
+  Installs a camera to control the viewport.
+  Parameters:
+    camera - A fully configured Camera.
+  Returns: ()
+  Implementation: self.active_camera = Some(camera).
 
-ScrollAxis::Up
-ScrollAxis::Down
-ScrollAxis::Left
-ScrollAxis::Right
+--------------------------------------------------------------------------------
 
-============================================================
-ANIMATED SPRITE
-============================================================
+Canvas::clear_camera()
+  Removes the active camera, returning to world-space rendering.
+  Returns: ()
+  Implementation: self.active_camera = None.
 
-AnimatedSprite::new(gif_bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String>
-AnimatedSprite::from_frames(frames: Vec<RgbaImage>, size: (f32, f32), fps: f32) -> Self
-AnimatedSprite::update(&mut self, delta_time: f32)
-AnimatedSprite::get_current_image(&self) -> Image
-AnimatedSprite::set_fps(&mut self, fps: f32)
-AnimatedSprite::reset(&mut self)
-AnimatedSprite::frame_count(&self) -> usize
-AnimatedSprite::set_frame(&mut self, frame: usize)
+--------------------------------------------------------------------------------
 
-============================================================
-CAMERA
-============================================================
+Canvas::camera() -> Option<&Camera>
+  Returns a shared reference to the active camera, if any.
+  Implementation: self.active_camera.as_ref()
 
-Camera::new(world_size: (f32, f32), viewport_size: (f32, f32)) -> Self
-Camera::follow(&mut self, target: Option<Target>)
-Camera::center_on(&mut self, wx: f32, wy: f32)
-Camera::lerp_toward(&mut self, wx: f32, wy: f32)  [pub(crate)]
+--------------------------------------------------------------------------------
 
-Fields:
-  position: (f32, f32)
-  world_size: (f32, f32)
-  lerp_speed: f32
+Canvas::camera_mut() -> Option<&mut Camera>
+  Returns a mutable reference to the active camera, if any.
+  Implementation: self.active_camera.as_mut()
 
-============================================================
-SCENE
-============================================================
+--------------------------------------------------------------------------------
 
-Scene::new(name: impl Into<String>) -> Self
-Scene::with_object(self, name: impl Into<String>, obj: GameObject) -> Self
-Scene::with_event(self, event: GameEvent, target: Target) -> Self
-Scene::on_enter<F>(self, f: F) -> Self  where F: FnMut(&mut Canvas) + Clone + 'static
-Scene::on_exit<F>(self, f: F) -> Self   where F: FnMut(&mut Canvas) + Clone + 'static
+Canvas::collision_between(t1: &Target, t2: &Target) -> bool
+  Tests whether any object in t1 overlaps any object in t2.
+  Parameters:
+    t1, t2 - Target selectors.
+  Returns:
+    true if at least one AABB collision is detected between the two groups.
+  Implementation:
+    Resolves both targets to index sets. Iterates all i×j pairs (skipping
+    i==j), calls Canvas::check_collision(o1, o2) on each pair.
 
-Fields:
-  name: String
+--------------------------------------------------------------------------------
 
-============================================================
-SCENE MANAGER
-============================================================
+Canvas::objects_in_radius(game_object: &GameObject, radius_px: f32) -> Vec<&GameObject>
+  Returns all visible objects whose centre falls within radius_px of
+  game_object's centre.
+  Parameters:
+    game_object - Reference object (its id is excluded from results).
+    radius_px   - Search radius in virtual pixels.
+  Returns:
+    Vec of shared references to matching GameObjects.
+  Implementation:
+    Computes centre of game_object, iterates store.objects, filters by
+    visibility, id inequality, and squared-distance ≤ radius_px².
 
-SceneManager::new() -> Self
-SceneManager::add_scene(&mut self, scene: Scene)
-SceneManager::active_scene(&self) -> Option<&str>
-SceneManager::has_scene(&self, name: &str) -> bool
+--------------------------------------------------------------------------------
+
+Canvas::get_virtual_size() -> (f32, f32)
+  Returns the virtual canvas size (width, height) in virtual pixels.
+  Implementation: self.layout.canvas_size.get()
+
+--------------------------------------------------------------------------------
+
+Canvas::play_sound(file_path: &str) -> SoundHandle
+  Plays an audio file with default options.
+  Parameters:
+    file_path - Path to the audio file (mp3, wav, ogg, flac, …).
+  Returns:
+    SoundHandle for controlling playback.
+  Implementation: Delegates to spawn_sound(file_path, SoundOptions::default()).
+
+--------------------------------------------------------------------------------
+
+Canvas::play_sound_with(file_path: &str, options: SoundOptions) -> SoundHandle
+  Plays an audio file with custom options.
+  Parameters:
+    file_path - Path to the audio file.
+    options   - SoundOptions (volume, looping, pitch, delay, fade-in, pan).
+  Returns:
+    SoundHandle for controlling playback.
+  Implementation: Delegates to spawn_sound(file_path, options).
+
+--------------------------------------------------------------------------------
+
+Canvas::on_mouse_press(cb: impl FnMut(&mut Canvas, MouseButton, (f32,f32)) + Clone + 'static)
+  Registers a global mouse-press callback (fires for any click on the canvas).
+  Parameters:
+    cb - Closure receiving the canvas, which button was pressed, and the
+         virtual-space cursor position.
+  Implementation: Appends boxed cb to mouse.press_callbacks.
+
+--------------------------------------------------------------------------------
+
+Canvas::on_mouse_release(cb: impl FnMut(&mut Canvas, MouseButton, (f32,f32)) + Clone + 'static)
+  Registers a global mouse-release callback.
+  Same signature and behaviour as on_mouse_press but fires on release.
+  Implementation: Appends boxed cb to mouse.release_callbacks.
+
+--------------------------------------------------------------------------------
+
+Canvas::on_mouse_move(cb: impl FnMut(&mut Canvas, (f32,f32)) + Clone + 'static)
+  Registers a callback that fires whenever the cursor moves.
+  Parameters:
+    cb - Closure receiving the canvas and the new virtual cursor position.
+  Implementation: Appends boxed cb to mouse.move_callbacks.
+
+--------------------------------------------------------------------------------
+
+Canvas::on_mouse_scroll(cb: impl FnMut(&mut Canvas, (f32,f32)) + Clone + 'static)
+  Registers a callback that fires on scroll wheel / trackpad events.
+  Parameters:
+    cb - Closure receiving the canvas and (dx, dy) scroll delta.
+  Implementation: Appends boxed cb to mouse.scroll_callbacks.
+
+--------------------------------------------------------------------------------
+
+Canvas::mouse_position() -> Option<(f32, f32)>
+  Returns the last known virtual-space cursor position.
+  Returns:
+    Some((x, y)) in virtual coordinates, or None if the cursor has left the
+    window.
+  Implementation: self.mouse.position
+
+--------------------------------------------------------------------------------
+
+Canvas::on_key_press(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+  Registers a callback that fires once when a key is first pressed.
+  Parameters:
+    cb - Closure receiving the canvas and a reference to the pressed Key.
+  Implementation: Appends boxed cb to input.press_callbacks.
+
+--------------------------------------------------------------------------------
+
+Canvas::on_key_release(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+  Registers a callback that fires once when a key is released.
+  Parameters:
+    cb - Closure receiving the canvas and a reference to the released Key.
+  Implementation: Appends boxed cb to input.release_callbacks.
+
+--------------------------------------------------------------------------------
+
+Canvas::is_key_held(key: &Key) -> bool
+  Low-level held-key test accepting a Key enum directly.
+  Parameters:
+    key - A Key::Named or Key::Character value.
+  Returns: bool
+  Implementation: self.input.held_keys.contains(key)
+
+--------------------------------------------------------------------------------
+
+Canvas::add_scene(scene: Scene)
+  Registers a scene with the scene manager without activating it.
+  Parameters:
+    scene - A configured Scene.
+  Implementation: Delegates to scene_manager.add_scene(scene).
+
+--------------------------------------------------------------------------------
+
+Canvas::load_scene(name: &str)
+  Switches to the named scene (unloads the current scene first).
+  Parameters:
+    name - The name given to Scene::new().
+  Returns: ()
+  Implementation:
+    1. If a scene is currently active, collects all its object names, fires
+       the on_exit callback, then calls remove_game_object for each name.
+    2. Clones objects and events from the new scene; takes the on_enter
+       callback.
+    3. Sets scene_manager.active_scene to the new name.
+    4. Calls add_game_object for each object and add_event for each event.
+    5. Runs the on_enter callback if present, then re-stores it.
+
+--------------------------------------------------------------------------------
+
+Canvas::active_scene() -> Option<&str>
+  Returns the name of the currently active scene, if any.
+  Implementation: self.scene_manager.active_scene()
+
+--------------------------------------------------------------------------------
+
+Canvas::is_scene(name: &str) -> bool
+  Returns true if the named scene is the currently active one.
+  Parameters:
+    name - Scene name to check.
+  Implementation:
+    self.scene_manager.active_scene.as_deref() == Some(name)
+
+--------------------------------------------------------------------------------
+  MODULE: CanvasMode  (lib.rs)
+--------------------------------------------------------------------------------
+
+CanvasMode  (enum)
+  Variants:
+    Landscape  - 16:9 aspect ratio, virtual resolution 3840×2160.
+    Portrait   - 9:16 aspect ratio, virtual resolution 2160×3840.
+    Fullscreen - No virtual resolution; renders at actual window size, scale 1.
+
+CanvasMode::aspect_ratio() -> f32  (pub(crate))
+  Returns the float aspect ratio for the mode.
+
+CanvasMode::virtual_resolution() -> Option<(f32, f32)>  (pub(crate))
+  Returns Some((width, height)) virtual pixels, or None for Fullscreen.
+
+--------------------------------------------------------------------------------
+  MODULE: CanvasLayout  (lib.rs)
+--------------------------------------------------------------------------------
+
+CanvasLayout implements Layout (prism):
+
+  request_size(_children) -> SizeRequest
+    Returns SizeRequest(0, 0, MAX, MAX) — takes all available space.
+
+  build(size: (f32,f32), children: Vec<SizeRequest>) -> Vec<Area>
+    Computes the scale factor and letterbox padding from the window size vs.
+    virtual resolution, stores them in Cell fields, then maps each (offset,
+    child) pair to an Area { offset: offset*scale+padding, size: size*scale }.
+
+--------------------------------------------------------------------------------
+  MODULE: Action  (game_object/action.rs)
+--------------------------------------------------------------------------------
+
+Action  (enum, Clone, Debug)
+  All variants accepted by Canvas::run().
+
+  ApplyMomentum  { target: Target, value: (f32, f32) }
+    Adds value to the current momentum of every matched object.
+
+  SetMomentum  { target: Target, value: (f32, f32) }
+    Replaces the momentum of every matched object with value.
+
+  SetResistance  { target: Target, value: (f32, f32) }
+    Sets the drag/resistance coefficient of every matched object.
+
+  Spawn  { object: Box<GameObject>, location: Location }
+    Creates a clone of object at the resolved Location, naming it
+    "spawned_{id}".
+
+  Remove  { target: Target }
+    Removes all matched objects from the canvas.
+
+  TransferMomentum  { from: Target, to: Target, scale: f32 }
+    Averages momentum across `from` objects, multiplies by scale, sets result
+    on all `to` objects.
+
+  SetAnimation  { target: Target, animation_bytes: &'static [u8], fps: f32 }
+    Loads a GIF from static bytes and assigns an AnimatedSprite to each matched
+    object.
+
+  Teleport  { target: Target, location: Location }
+    Instantly moves every matched object to the resolved Location.
+
+  Show  { target: Target }
+    Sets visible = true on every matched object.
+
+  Hide  { target: Target }
+    Sets visible = false on every matched object.
+
+  Toggle  { target: Target }
+    Flips the visible flag on every matched object.
+
+  Conditional  { condition: Condition, if_true: Box<Action>, if_false: Option<Box<Action>> }
+    Evaluates condition; runs if_true on success, if_false (if present) on
+    failure.
+
+  Custom  { name: String }
+    Looks up and calls the named callback from Canvas::register_custom_event.
+
+--------------------------------------------------------------------------------
+  MODULE: Target / Location / Anchor  (game_object/target.rs)
+--------------------------------------------------------------------------------
+
+Target  (enum, Debug, Clone)
+  Selects one or more game objects.
+  Variants:
+    ByName(String)  - Selects the single object with this exact name.
+    ById(String)    - Selects the single object with this id.
+    ByTag(String)   - Selects ALL objects that have this tag.
+
+  Target::name(s: impl Into<String>) -> Target
+    Constructor shorthand for ByName.
+
+  Target::id(s: impl Into<String>) -> Target
+    Constructor shorthand for ById.
+
+  Target::tag(s: impl Into<String>) -> Target
+    Constructor shorthand for ByTag.
+
+Anchor  (struct, Debug, Clone, Copy)
+  Fields:
+    x: f32  — Horizontal anchor in normalised object space (0 = left, 1 = right).
+    y: f32  — Vertical anchor (0 = top, 1 = bottom).
+
+Location  (enum, Debug, Clone)
+  Describes where to place or teleport an object.
+  Variants:
+    Position((f32, f32))
+      Absolute virtual-space coordinate.
+
+    Between(Box<Target>, Box<Target>)
+      Midpoint of the two targets' top-left positions.
+
+    AtTarget(Box<Target>)
+      Exact position of the first matched target.
+
+    Relative { target: Box<Target>, offset: (f32, f32) }
+      Target's position plus offset.
+
+    OnTarget { target: Box<Target>, anchor: Anchor, offset: (f32, f32) }
+      A specific anchor point on the target, plus offset.
+
+  Location::at(x: f32, y: f32) -> Location
+    Shorthand for Location::Position((x, y)).
+
+Location::resolve_position(store: &ObjectStore) -> (f32, f32)  (pub(crate))
+  Resolves the Location variant against the live object store to produce an
+  absolute (x, y) coordinate.
+
+--------------------------------------------------------------------------------
+  MODULE: Condition  (game_object/condition.rs)
+--------------------------------------------------------------------------------
+
+Condition  (enum, Clone, Debug)
+  Variants:
+    Always                     — always true.
+    KeyHeld(Key)               — true while the key is held.
+    KeyNotHeld(Key)            — true while the key is NOT held.
+    Collision(Target)          — true if any matched object is colliding with
+                                 any other object.
+    NoCollision(Target)        — inverse of Collision.
+    And(Box<Condition>, Box<Condition>) — logical AND.
+    Or(Box<Condition>, Box<Condition>)  — logical OR.
+    Not(Box<Condition>)                 — logical NOT.
+    IsVisible(Target)          — true if any matched object is visible.
+    IsHidden(Target)           — true if any matched object is hidden.
+
+Canvas::evaluate_condition(condition: &Condition) -> bool  (pub(crate))
+  Recursively evaluates a Condition against the current canvas state.
+
+--------------------------------------------------------------------------------
+  MODULE: GameEvent  (game_object/game_event.rs)
+--------------------------------------------------------------------------------
+
+GameEvent  (enum, Clone, Debug)
+  Attaches a reaction to a game object via Canvas::add_event.
+
+  Tick { action: Action }
+    Fires every frame for the owning object.
+
+  KeyPress   { key: Key, action: Action }
+    Fires once on the first frame the key is pressed.
+
+  KeyRelease { key: Key, action: Action }
+    Fires once on the frame the key is released.
+
+  KeyHold    { key: Key, action: Action }
+    Fires every frame while the key is held.
+
+  Collision  { action: Action }
+    Fires when the owning object overlaps another.
+
+  BoundaryCollision { action: Action }
+    Fires when the owning object hits the canvas boundary.
+
+  MousePress   { button: Option<MouseButton>, action: Action }
+    Fires when the mouse is clicked over the object. button=None matches any.
+
+  MouseRelease { button: Option<MouseButton>, action: Action }
+    Fires when the mouse is released over the object.
+
+  MouseMove    { action: Action }
+    Fires every frame the cursor moves while over the object.
+
+  MouseOver    { action: Action }
+    Fires every tick while the cursor is over the object.
+
+  MouseEnter   { action: Action }
+    Fires once when the cursor enters the object's bounds.
+
+  MouseLeave   { action: Action }
+    Fires once when the cursor leaves the object's bounds.
+
+  MouseScroll  { axis: Option<ScrollAxis>, action: Action }
+    Fires when the scroll wheel moves over the object.
+    axis=None matches any scroll direction.
+
+MouseButton  (enum, Clone, Copy, Debug, PartialEq)
+  Variants: Left, Right, Middle
+
+ScrollAxis  (enum, Clone, Copy, Debug)
+  Variants: Up, Down, Left, Right
+
+--------------------------------------------------------------------------------
+  MODULE: GameObject / GameObjectBuilder  (game_object/game_object.rs)
+--------------------------------------------------------------------------------
+
+GameObjectBuilder
+  Fluent builder for constructing GameObjects.
+
+  GameObjectBuilder::new() -> GameObjectBuilder
+    Creates a builder with default zeroed state.
+
+  Methods (all return Self for chaining):
+    .id(id: impl Into<String>)             — Sets the object's unique id.
+    .position(x: f32, y: f32)             — Sets initial top-left position.
+    .size(w: f32, h: f32)                 — Sets bounding-box size in virtual px.
+    .tag(tag: impl Into<String>)           — Adds a tag (multiple calls allowed).
+    .visible(v: bool)                      — Sets initial visibility.
+    .image(img: Image)                     — Sets a static sprite image.
+    .shape(shape: ShapeType)               — Sets the drawn shape.
+    .text(text: Text)                      — Sets a text drawable.
+    .gravity(gx: f32, gy: f32)            — Sets per-frame gravity acceleration.
+    .momentum(mx: f32, my: f32)           — Sets initial momentum.
+    .resistance(rx: f32, ry: f32)         — Sets drag coefficient (0–1).
+    .is_platform(v: bool)                  — Marks object as a one-way platform.
+    .z_index(z: i32)                       — Sets rendering order.
+
+  GameObjectBuilder::build() -> GameObject
+    Finalises and returns the GameObject.
+
+GameObject  (struct, Clone, Debug)
+  Public fields (selection):
+    id: String
+    position: (f32, f32)
+    size: (f32, f32)
+    momentum: (f32, f32)
+    resistance: (f32, f32)
+    visible: bool
+    is_platform: bool
+    tags: Vec<String>
+    z_index: i32
+    animated_sprite: Option<AnimatedSprite>
+
+  GameObject methods:
+    .set_animation(sprite: AnimatedSprite)
+      Replaces the current animated sprite.
+
+    .update_animation(delta_time: f32)   (pub(crate))
+      Advances the animated sprite frame timer.
+
+    .update_image_shape()                (pub(crate))
+      Syncs the drawable shape from the static image if no animation is active.
+
+    .apply_gravity()                     (pub(crate))
+      Adds self.gravity to self.momentum each frame.
+
+    .update_position()                   (pub(crate))
+      Adds self.momentum to self.position each frame.
+
+    .apply_resistance()                  (pub(crate))
+      Multiplies momentum by (1 - resistance) each frame.
+
+    .contains_point(pt: (f32, f32)) -> bool
+      Returns true if pt is inside the object's AABB.
+
+    .get_anchor_position(anchor: Anchor) -> (f32, f32)
+      Returns the world position of the given anchor point on the object.
+
+--------------------------------------------------------------------------------
+  MODULE: AnimatedSprite  (animation.rs)
+--------------------------------------------------------------------------------
+
+AnimatedSprite::new(gif_bytes: &[u8], size: (f32,f32), fps: f32)
+    -> Result<AnimatedSprite, String>
+  Decodes a GIF from a byte slice.
+  Parameters:
+    gif_bytes - Raw GIF file bytes (typically &'static [u8] from include_bytes!).
+    size      - Render size (w, h) in virtual pixels.
+    fps       - Playback speed in frames per second.
+  Returns:
+    Ok(AnimatedSprite) on success, Err(String) if decoding fails or the GIF is
+    empty.
+  Implementation:
+    Wraps bytes in Cursor, uses image::codecs::gif::GifDecoder, collects all
+    decoded RgbaImage frames into a Vec.
+
+AnimatedSprite::from_frames(frames: Vec<RgbaImage>, size: (f32,f32), fps: f32)
+    -> AnimatedSprite
+  Constructs a sprite from pre-decoded RGBA frames.
+  Panics if frames is empty.
+
+AnimatedSprite::update(delta_time: f32)
+  Advances the frame timer and increments current_frame (wrapping) as needed.
+
+AnimatedSprite::get_current_image() -> Image
+  Returns a prism Image for the current frame, sized to self.size.
+
+AnimatedSprite::set_fps(fps: f32)
+  Updates the frame duration without resetting the current frame.
+
+AnimatedSprite::reset()
+  Resets to frame 0 and clears the frame timer.
+
+AnimatedSprite::frame_count() -> usize
+  Returns the total number of frames.
+
+AnimatedSprite::set_frame(frame: usize)
+  Jumps to a specific frame index (no-op if out of range).
+
+--------------------------------------------------------------------------------
+  MODULE: Scene / SceneManager  (scene.rs)
+--------------------------------------------------------------------------------
+
+Scene::new(name: impl Into<String>) -> Scene
+  Creates an empty scene with the given name.
+
+Scene::with_object(name: impl Into<String>, obj: GameObject) -> Scene  (builder)
+  Adds an object that will be registered when the scene is loaded.
+
+Scene::with_event(event: GameEvent, target: Target) -> Scene  (builder)
+  Adds an event binding that will be applied when the scene is loaded.
+
+Scene::on_enter<F>(f: F) -> Scene  (builder)
+  Sets a callback to run once immediately after the scene finishes loading.
+  F: FnMut(&mut Canvas) + Clone + 'static
+
+Scene::on_exit<F>(f: F) -> Scene  (builder)
+  Sets a callback to run once just before the scene is unloaded.
+  F: FnMut(&mut Canvas) + Clone + 'static
+
+SceneManager::new() -> SceneManager
+  Creates an empty scene manager.
+
+SceneManager::add_scene(scene: Scene)
+  Inserts the scene into the internal HashMap keyed by scene.name.
+
+SceneManager::active_scene() -> Option<&str>
+  Returns the name of the currently loaded scene.
+
+SceneManager::has_scene(name: &str) -> bool
+  Returns true if a scene with that name is registered.
+
+--------------------------------------------------------------------------------
+  MODULE: Camera  (camera.rs)
+--------------------------------------------------------------------------------
+
+Camera::new(world_size: (f32,f32), viewport_size: (f32,f32)) -> Camera
+  Creates a camera positioned at (0,0) with lerp_speed = 0.10.
+  Parameters:
+    world_size    - Total scrollable world in virtual pixels.
+    viewport_size - Visible area in virtual pixels (usually canvas size).
+
+Camera::follow(target: Option<Target>)
+  Sets or clears the object the camera will smoothly track.
+  Passing None stops following.
+
+Camera::center_on(wx: f32, wy: f32)
+  Instantly centres the viewport on world point (wx, wy), clamped to world
+  bounds.
+
+Camera::lerp_toward(wx: f32, wy: f32)  (pub(crate))
+  Smoothly moves the camera toward (wx, wy) by lerp_speed each call (called
+  internally every tick when follow_target is set).
+
+  Fields:
+    position: (f32, f32)   — Current camera world offset.
+    world_size: (f32, f32) — Total world dimensions.
+    lerp_speed: f32        — Interpolation factor per tick (default 0.10).
+
+--------------------------------------------------------------------------------
+  MODULE: SoundOptions  (sound.rs)
+--------------------------------------------------------------------------------
+
+SoundOptions::new() -> SoundOptions
+SoundOptions::default() -> SoundOptions
+  Both return default: volume=1.0, looping=false, pitch=1.0, delay=0, fade_in=0,
+  pan=0.
+
+Builder methods (all return Self):
+  .volume(v: f32)      — Playback volume. Clamped to ≥ 0.
+  .looping(l: bool)    — Whether to loop continuously.
+  .pitch(p: f32)       — Playback speed / pitch. Clamped to ≥ 0.01.
+  .delay(s: f32)       — Seconds to wait before starting. Clamped to ≥ 0.
+  .fade_in(s: f32)     — Duration of the fade-in ramp. Clamped to ≥ 0.
+  .pan(p: f32)         — Stereo pan. Clamped to [-1.0, 1.0].
+
+--------------------------------------------------------------------------------
+  MODULE: SoundHandle  (sound.rs)
+--------------------------------------------------------------------------------
+
+SoundHandle  (Clone)
+  Returned by Canvas::play_sound / play_sound_with.
+
+SoundHandle::stop()
+  Stops playback immediately and marks the handle as finished.
+
+SoundHandle::pause()
+  Pauses playback without discarding position.
+
+SoundHandle::resume()
+  Resumes a paused sound.
+
+SoundHandle::toggle_pause()
+  Pauses if playing, resumes if paused.
+
+SoundHandle::set_volume(volume: f32)
+  Sets playback volume (≥ 0). Takes effect immediately.
+
+SoundHandle::set_speed(speed: f32)
+  Sets playback speed / pitch (≥ 0.01). Takes effect immediately.
+
+SoundHandle::fade_to(target: f32, duration_secs: f32)
+  Gradually changes volume to target over duration_secs.
+  Runs on a background thread (60 steps). Does not stop the sound afterwards.
+
+SoundHandle::fade_out(duration_secs: f32)
+  Stops looping, fades volume to 0 over duration_secs, then stops the sink.
+  Runs on a background thread.
+
+SoundHandle::is_finished() -> bool
+  Returns true once the sound has completely stopped (naturally or via stop/
+  fade_out).
+
+SoundHandle::is_paused() -> bool
+  Returns true if the sink is currently paused.
+
+SoundHandle::volume() -> f32
+  Returns the current volume of the sink.
+
+SoundHandle::speed() -> f32
+  Returns the current playback speed of the sink.
+
+spawn_sound(file_path: &str, options: SoundOptions) -> SoundHandle  (pub(crate))
+  Internal function that spawns a background thread to open the audio device,
+  configure the sink, and append decoded audio sources. Implements looping,
+  delay, fade-in, and pan. Returns a SoundHandle immediately (with up to 300ms
+  timeout for the sink to initialise).
+
+--------------------------------------------------------------------------------
+  MODULE: ObjectStore  (object_store.rs)
+--------------------------------------------------------------------------------
+
+ObjectStore::new() -> ObjectStore
+  Creates an empty store.
+
+ObjectStore::add(name: String, obj: GameObject)
+  Appends the object to objects, names, and events vectors; updates
+  name_to_index, id_to_index, and tag_to_indices HashMaps.
+
+ObjectStore::remove(name: &str) -> bool
+  Removes the object and its events. Reindexes all maps so indices remain
+  consecutive. Returns false if name is not found.
+
+ObjectStore::get_indices(target: &Target) -> Vec<usize>
+  Resolves a Target selector to a list of storage indices.
+  ByName / ById → vec of 0 or 1.
+  ByTag         → cloned vec from tag_to_indices.
+
+ObjectStore::get_names(target: &Target) -> Vec<String>
+  Converts a Target to a list of object name strings.
+
+ObjectStore::apply_to_targets<F>(target: &Target, f: F)
+  Resolves target to indices and applies the mutable closure f to each
+  matched GameObject.
+  F: FnMut(&mut GameObject)
+
+--------------------------------------------------------------------------------
+  MODULE: InputState  (input.rs)
+--------------------------------------------------------------------------------
+
+InputState::new() -> InputState
+  Returns default empty state.
+
+  Fields:
+    held_keys: HashSet<Key>
+    press_callbacks: Vec<Box<dyn Callback>>
+    release_callbacks: Vec<Box<dyn Callback>>
+
+Canvas::handle_keyboard_event(evt: &KeyboardEvent)  (pub(crate))
+  Processes raw keyboard events from prism:
+    Pressed  → inserts key into held_keys (if new), fires press_callbacks,
+               calls process_key_events with is_key_press predicate.
+    Released → removes key from held_keys, fires release_callbacks,
+               calls process_key_events with is_key_release predicate.
+
+Canvas::process_key_events<F>(key: &Key, predicate: F)  (pub(crate))
+  Scans all stored events, runs predicate to filter them by type and matching
+  key, then executes each matching action.
+
+Canvas::process_held_key_events()  (pub(crate))
+  Called every tick. Scans all stored events for KeyHold events whose key is
+  currently in held_keys and runs their actions.
+
+--------------------------------------------------------------------------------
+  MODULE: MouseState  (mouse.rs)
+--------------------------------------------------------------------------------
+
+MouseState::new() -> MouseState
+  Returns default empty state.
+
+  Fields:
+    position: Option<(f32, f32)>
+    hovered_indices: HashSet<usize>
+    press_callbacks, release_callbacks: Vec<Box<dyn MouseCallback>>
+    move_callbacks: Vec<Box<dyn MouseMoveCallback>>
+    scroll_callbacks: Vec<Box<dyn MouseScrollCallback>>
+
+Canvas::handle_mouse_event(evt: MouseEvent)  (pub(crate))
+  Dispatches to the appropriate processing method based on event state:
+    Pressed  → converts to virtual coords, fires press_callbacks,
+               calls process_mouse_press_events.
+    Released → fires release_callbacks, calls process_mouse_release_events.
+    Moved    → fires move_callbacks, process_mouse_move_events,
+               update_hover_state.
+    Scroll   → fires scroll_callbacks, process_mouse_scroll_events.
+  If position is None (cursor left window), drains hovered_indices and fires
+  mouse leave events.
+
+Canvas::objects_under_cursor(vpos: (f32,f32)) -> Vec<usize>  (pub(crate))
+  Returns indices of all visible objects whose AABB contains vpos.
+
+Canvas::update_hover_state(vpos: (f32,f32))  (pub(crate))
+  Computes newly entered and newly left sets from the previous hover snapshot,
+  fires MouseEnter/MouseLeave events, then updates hovered_indices.
+
+Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)  (pub(crate))
+  Converts window-space pixel coordinates to virtual-space coordinates using
+  current scale and safe_area_offset.
+
+--------------------------------------------------------------------------------
+  MODULE: CallbackStore  (callbacks.rs)
+--------------------------------------------------------------------------------
+
+CallbackStore::new() -> CallbackStore
+  Returns empty tick Vec and custom HashMap.
+
+  Fields:
+    tick:   Vec<Box<dyn EventCallback>>
+    custom: HashMap<String, Box<dyn EventCallback>>
+
+--------------------------------------------------------------------------------
+  MODULE: Image Utilities  (image_utils.rs)
+--------------------------------------------------------------------------------
+
+load_image(path: &str) -> Image
+  Reads an image file from disk, decodes it to RGBA8, and returns a prism
+  Image sized to the image's natural dimensions.
+  Panics if the file cannot be read or decoded.
+
+load_image_sized(path: &str, w: f32, h: f32) -> Image
+  Same as load_image but overrides the drawn size to (w, h) virtual pixels,
+  regardless of the image's natural size.
+  Panics if the file cannot be read or decoded.
+
+--------------------------------------------------------------------------------
+  INTERNAL / FRAME-LOOP METHODS  (called automatically each tick)
+--------------------------------------------------------------------------------
+
+Canvas::update_objects(delta_time: f32)  (pub(crate))
+  For every object: updates scaled_size, advances animation, calls
+  apply_gravity / update_position / apply_resistance, syncs layout.offsets.
+  Then calls handle_infinite_scroll and apply_camera_transform.
+
+Canvas::apply_camera_transform()  (pub(crate))
+  If a camera has a follow_target, lerps toward that object's centre. Then
+  applies the camera offset to all layout.offsets.
+
+Canvas::handle_collisions()  (pub(crate))
+  Brute-force O(n²) AABB check. Platform landing adjusts the falling object's
+  y and zeros its vertical momentum. Non-platform pairs fire collision events.
+
+Canvas::handle_infinite_scroll()  (pub(crate))
+  For objects tagged "scroll": if an object has scrolled fully off the left
+  edge (position.x + size.w ≤ -10), it is repositioned just to the right of
+  the furthest right sibling — creating a seamless parallax loop.
+
+Canvas::check_collision(o1: &GameObject, o2: &GameObject) -> bool  (pub(crate))
+  Standard AABB test. Returns false if either object is invisible.
+
+Canvas::evaluate_condition(condition: &Condition) -> bool  (pub(crate))
+  Recursive Condition evaluator (see Condition section).
+
+Canvas::trigger_collision_events(idx: usize)  (pub(crate))
+Canvas::trigger_boundary_collision_events(idx: usize)  (pub(crate))
+  Collect and run Collision / BoundaryCollision action lists for a single
+  object index.
+
+================================================================================
+  END OF API REFERENCE
+================================================================================

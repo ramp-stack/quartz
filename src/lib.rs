@@ -7,8 +7,10 @@ pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
 
+pub mod entropy;
 pub mod game_object;
 mod animation;
+mod text;
 mod apis;
 mod sound;
 mod scene;
@@ -17,9 +19,8 @@ pub mod object_store;
 pub mod input;
 pub mod callbacks;
 pub mod mouse;
-mod image_utils;
 pub use game_object::{GameObject, GameObjectBuilder, Target, Location, Anchor, Condition, Action, GameEvent, MouseButton, ScrollAxis};
-pub use animation::AnimatedSprite;
+pub use animation::{AnimatedSprite, load_image, load_image_sized, flip_horizontal, flip_vertical, rotate_cw, rotate_ccw, rotate_180};
 pub use scene::{Scene, SceneManager};
 pub use camera::Camera;
 pub use mouse::{MouseCallback, MouseMoveCallback, MouseScrollCallback, MouseState};
@@ -27,8 +28,8 @@ pub use input::{InputState, Callback};
 pub use callbacks::{CallbackStore, EventCallback};
 pub use object_store::ObjectStore;
 pub use sound::{SoundOptions, SoundHandle};
-
-pub use image_utils::{load_image, load_image_sized};
+pub use entropy::Entropy;
+pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
 
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -110,6 +111,7 @@ pub struct Canvas {
     callbacks:     CallbackStore,
     scene_manager: SceneManager,
     active_camera: Option<Camera>,
+    pub entropy: Entropy,
 }
 
 impl std::fmt::Debug for Canvas {
