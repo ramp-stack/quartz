@@ -25,7 +25,7 @@ pub struct GameObject {
     pub visible:      bool,
     pub layer:        Option<u32>,
     text_spec:        Option<TextSpec>,
-    last_text_scale:  Cell<f32>,  // cached scale — rebuild only when changed
+    last_text_scale:  Cell<f32>, 
 }
 
 impl OnEvent for GameObject {}
@@ -185,10 +185,8 @@ impl GameObject {
     }
 
     pub fn set_text(&mut self, spec: TextSpec) {
-        // Build at scale 1.0 initially; update_text_scale will correct it on
-        // the next tick if the canvas scale differs.
         let text = spec.build(1.0);
-        self.last_text_scale.set(0.0); // force rebuild on next tick
+        self.last_text_scale.set(0.0);
         self.text_spec = Some(spec);
         self.drawable  = Some(Box::new(text));
     }
@@ -235,8 +233,6 @@ impl GameObject {
         }
     }
 
-    /// Only rebuilds the Text drawable when `scale` differs from the last
-    /// value it was built with. On idle frames this is a single float compare.
     pub(crate) fn update_text_scale(&mut self, scale: f32) {
         if self.text_spec.is_none() { return; }
         if (self.last_text_scale.get() - scale).abs() < 0.0001 { return; }

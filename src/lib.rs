@@ -7,10 +7,12 @@ pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
 
+
 // ---------------------------------------------------------------------------
 // Modules
 // ---------------------------------------------------------------------------
 
+pub mod value;
 pub mod entropy;
 pub mod lerp;
 pub mod object;
@@ -49,10 +51,17 @@ pub use sound::{SoundOptions, SoundHandle};
 pub use entropy::Entropy;
 pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
 pub use lerp::Lerp;
-
-// ---------------------------------------------------------------------------
-// CanvasMode
-// ---------------------------------------------------------------------------
+ 
+pub use value::{
+    Expr,
+    Value,
+    MathOp,
+    CompOp,
+    resolve_expr,
+    apply_op,
+    compare_operands,
+};
+ 
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
@@ -79,9 +88,6 @@ impl CanvasMode {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CanvasLayout
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct CanvasLayout {
@@ -127,10 +133,6 @@ impl Layout for CanvasLayout {
         }).collect()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Canvas
-// ---------------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct Canvas {
