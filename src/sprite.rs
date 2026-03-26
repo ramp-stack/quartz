@@ -2,11 +2,6 @@ use prism::canvas::{Image, ShapeType};
 use image::{RgbaImage, AnimationDecoder, imageops};
 use std::io::Cursor;
 
-// ---------------------------------------------------------------------------
-// Image loading
-// ---------------------------------------------------------------------------
-
-/// Load an image from disk at its native pixel resolution.
 pub fn load_image(path: &str) -> Image {
     let rgba = image::open(path)
         .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
@@ -15,9 +10,6 @@ pub fn load_image(path: &str) -> Image {
     make_image(rgba, w, h)
 }
 
-/// Load an image and set its display size to `(w, h)`.
-/// The raw pixels are stored as-is — the renderer scales them to fit the shape.
-/// No pixel resize is done here, so this is fast.
 pub fn load_image_sized(path: &str, w: f32, h: f32) -> Image {
     let rgba = image::open(path)
         .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
@@ -25,40 +17,30 @@ pub fn load_image_sized(path: &str, w: f32, h: f32) -> Image {
     make_image(rgba, w, h)
 }
 
-
-// ---------------------------------------------------------------------------
-// Standalone image transform functions
-// ---------------------------------------------------------------------------
-
-/// Flip an `Image` horizontally (left <-> right).
 pub fn flip_horizontal(img: Image) -> Image {
     let (pixels, w, h) = extract(img);
     let flipped = imageops::flip_horizontal(&pixels);
     make_image(flipped, w, h)
 }
 
-/// Flip an `Image` vertically (top <-> bottom).
 pub fn flip_vertical(img: Image) -> Image {
     let (pixels, w, h) = extract(img);
     let flipped = imageops::flip_vertical(&pixels);
     make_image(flipped, w, h)
 }
 
-/// Rotate an `Image` 90° clockwise. Logical size becomes `(h, w)`.
 pub fn rotate_cw(img: Image) -> Image {
     let (pixels, w, h) = extract(img);
     let rotated = imageops::rotate270(&pixels);
     make_image(rotated, h, w)
 }
 
-/// Rotate an `Image` 90° counter-clockwise. Logical size becomes `(h, w)`.
 pub fn rotate_ccw(img: Image) -> Image {
     let (pixels, w, h) = extract(img);
     let rotated = imageops::rotate90(&pixels);
     make_image(rotated, h, w)
 }
 
-/// Rotate an `Image` 180°. Size is unchanged.
 pub fn rotate_180(img: Image) -> Image {
     let (pixels, w, h) = extract(img);
     let rotated = imageops::rotate180(&pixels);
@@ -81,10 +63,6 @@ fn make_image(pixels: RgbaImage, w: f32, h: f32) -> Image {
         color: None,
     }
 }
-
-// ---------------------------------------------------------------------------
-// RotationOptions
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RotationDirection {
@@ -123,10 +101,6 @@ impl Default for RotationOptions {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AnimatedSprite
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
 pub struct AnimatedSprite {
     frames:                Vec<RgbaImage>,
@@ -140,9 +114,8 @@ pub struct AnimatedSprite {
 }
 
 impl AnimatedSprite {
-
     pub fn new(gif_bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String> {
-        let cursor = Cursor::new(gif_bytes);
+        let cursor  = Cursor::new(gif_bytes);
         let decoder = image::codecs::gif::GifDecoder::new(cursor)
             .map_err(|e| format!("Failed to decode GIF: {}", e))?;
 
@@ -164,19 +137,15 @@ impl AnimatedSprite {
         assert!(!frames.is_empty(), "AnimatedSprite::from_frames requires at least one frame");
         Self {
             frames,
-            current_frame: 0,
-            frame_duration: 1.0 / fps,
+            current_frame:         0,
+            frame_duration:        1.0 / fps,
             time_since_last_frame: 0.0,
             size,
-            mirrored_h: false,
-            mirrored_v: false,
-            rotation: RotationOptions::default(),
+            mirrored_h:            false,
+            mirrored_v:            false,
+            rotation:              RotationOptions::default(),
         }
     }
-
-    // -----------------------------------------------------------------------
-    // Playback
-    // -----------------------------------------------------------------------
 
     pub fn update(&mut self, delta_time: f32) {
         self.time_since_last_frame += delta_time;
@@ -200,7 +169,7 @@ impl AnimatedSprite {
     pub fn set_fps(&mut self, fps: f32) { self.frame_duration = 1.0 / fps; }
 
     pub fn reset(&mut self) {
-        self.current_frame = 0;
+        self.current_frame         = 0;
         self.time_since_last_frame = 0.0;
     }
 
@@ -208,60 +177,41 @@ impl AnimatedSprite {
 
     pub fn set_frame(&mut self, frame: usize) {
         if frame < self.frames.len() {
-            self.current_frame = frame;
+            self.current_frame         = frame;
             self.time_since_last_frame = 0.0;
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Mirror API
-    // -----------------------------------------------------------------------
-
-    /// Toggle horizontal mirror (left <-> right).
-    pub fn mirror(&mut self) { self.mirrored_h = !self.mirrored_h; }
-    pub fn set_mirrored(&mut self, v: bool) { self.mirrored_h = v; }
-    pub fn is_mirrored(&self) -> bool { self.mirrored_h }
-
-    /// Toggle vertical mirror (top <-> bottom).
-    pub fn mirror_vertical(&mut self) { self.mirrored_v = !self.mirrored_v; }
+    pub fn mirror(&mut self)                      { self.mirrored_h = !self.mirrored_h; }
+    pub fn set_mirrored(&mut self, v: bool)       { self.mirrored_h = v; }
+    pub fn is_mirrored(&self) -> bool             { self.mirrored_h }
+    pub fn mirror_vertical(&mut self)             { self.mirrored_v = !self.mirrored_v; }
     pub fn set_mirrored_vertical(&mut self, v: bool) { self.mirrored_v = v; }
-    pub fn is_mirrored_vertical(&self) -> bool { self.mirrored_v }
+    pub fn is_mirrored_vertical(&self) -> bool    { self.mirrored_v }
 
-    // -----------------------------------------------------------------------
-    // Rotation API
-    // -----------------------------------------------------------------------
-
-    /// Set continuous rotation (smooth, any angle).
     pub fn set_rotation(&mut self, options: RotationOptions) { self.rotation = options; }
 
-    /// Accumulate continuous rotation — call each tick to spin.
     pub fn rotate_by(&mut self, options: RotationOptions) {
         let new_rad = self.rotation.to_radians() + options.to_radians();
         self.rotation = RotationOptions {
-            degrees: new_rad.to_degrees(),
+            degrees:   new_rad.to_degrees(),
             direction: RotationDirection::Clockwise,
         };
     }
 
-    /// Reset continuous rotation to zero.
-    pub fn clear_rotation(&mut self) { self.rotation = RotationOptions::default(); }
-
-    /// Current continuous rotation in degrees (positive = clockwise).
+    pub fn clear_rotation(&mut self)      { self.rotation = RotationOptions::default(); }
     pub fn rotation_degrees(&self) -> f32 { self.rotation.to_radians().to_degrees() }
 
-    /// Snap all frames 90° clockwise (baked into pixels, lossless). Size becomes `(h, w)`.
     pub fn rotate_90_cw(&mut self) {
         self.frames = self.frames.iter().map(|f| imageops::rotate270(f)).collect();
         self.size = (self.size.1, self.size.0);
     }
 
-    /// Snap all frames 90° counter-clockwise (baked into pixels, lossless). Size becomes `(h, w)`.
     pub fn rotate_90_ccw(&mut self) {
         self.frames = self.frames.iter().map(|f| imageops::rotate90(f)).collect();
         self.size = (self.size.1, self.size.0);
     }
 
-    /// Snap all frames 180° (baked into pixels, lossless). Size unchanged.
     pub fn rotate_180(&mut self) {
         self.frames = self.frames.iter().map(|f| imageops::rotate180(f)).collect();
     }

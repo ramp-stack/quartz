@@ -1,25 +1,24 @@
 use std::collections::HashMap;
-
-use crate::game_object::{GameObject, GameEvent, Target};
+use crate::{GameObject, GameEvent, Target};
 
 #[derive(Debug, Default)]
 pub struct ObjectStore {
-    pub objects: Vec<GameObject>,
-    pub names: Vec<String>,
-    pub name_to_index: HashMap<String, usize>,
-    pub id_to_index: HashMap<String, usize>,
-    pub events: Vec<Vec<GameEvent>>,
+    pub objects:        Vec<GameObject>,
+    pub names:          Vec<String>,
+    pub name_to_index:  HashMap<String, usize>,
+    pub id_to_index:    HashMap<String, usize>,
+    pub events:         Vec<Vec<GameEvent>>,
     pub tag_to_indices: HashMap<String, Vec<usize>>,
 }
 
 impl Clone for ObjectStore {
     fn clone(&self) -> Self {
         Self {
-            objects: self.objects.clone(),
-            names: self.names.clone(),
-            name_to_index: self.name_to_index.clone(),
-            id_to_index: self.id_to_index.clone(),
-            events: self.events.iter().map(|v| v.iter().map(|e| e.clone()).collect()).collect(),
+            objects:        self.objects.clone(),
+            names:          self.names.clone(),
+            name_to_index:  self.name_to_index.clone(),
+            id_to_index:    self.id_to_index.clone(),
+            events:         self.events.iter().map(|v| v.clone()).collect(),
             tag_to_indices: self.tag_to_indices.clone(),
         }
     }
@@ -51,7 +50,7 @@ impl ObjectStore {
             None => return false,
         };
 
-        let removed_obj = self.objects.remove(idx);
+        let removed_obj  = self.objects.remove(idx);
         let removed_name = self.names.remove(idx);
         self.events.remove(idx);
 

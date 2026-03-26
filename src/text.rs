@@ -1,8 +1,6 @@
 use prism::canvas::{Text, Span, Align, Font, Color};
-
-// ---------------------------------------------------------------------------
-// SpanSpec / TextSpec
-// ---------------------------------------------------------------------------
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub struct SpanSpec {
@@ -15,18 +13,42 @@ pub struct SpanSpec {
 }
 
 #[derive(Clone, Debug)]
+struct CacheEntry {
+    span_keys: Vec<(String, Color)>,
+    scale:     f32,
+    text:      Text,
+}
+
+#[derive(Clone, Debug)]
 pub struct TextSpec {
     pub spans: Vec<SpanSpec>,
     pub align: Align,
+    cache: Arc<Mutex<Option<CacheEntry>>>,
 }
 
 impl TextSpec {
     pub fn new(spans: Vec<SpanSpec>, align: Align) -> Self {
-        Self { spans, align }
+        Self { spans, align, cache: Arc::new(Mutex::new(None)) }
     }
 
-    /// Build a prism Text with all font sizes multiplied by `scale`.
     pub fn build(&self, scale: f32) -> Text {
+        let span_keys: Vec<(String, Color)> = self.spans
+            .iter()
+            .map(|s| (s.text.clone(), s.color))
+            .collect();
+
+        let mut guard = self.cache.lock().unwrap();
+
+        if let Some(ref entry) = *guard {
+            let scale_ok = (entry.scale - scale).abs() < 0.0001;
+            let keys_ok  = entry.span_keys == span_keys;
+            if scale_ok && keys_ok {
+                return entry.text.clone();
+            }
+        }
+
+        let start = Instant::now();
+
         let spans: Vec<Span> = self.spans.iter().map(|s| {
             Span::new(
                 s.text.clone(),
@@ -37,35 +59,27 @@ impl TextSpec {
                 s.letter_spacing * scale,
             )
         }).collect();
-        Text::new(spans, None, self.align.clone(), None)
+
+        let text = Text::new(spans, None, self.align.clone(), None);
+
+        let elapsed = start.elapsed();
+        println!("Text build took: {:.3?}", elapsed);
+
+        *guard = Some(CacheEntry { span_keys, scale, text: text.clone() });
+        text
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Create a centred single-span TextSpec. Font size is in virtual pixels and
-/// scales automatically with the canvas.
-///
-/// ```rust
-/// obj.set_text(make_text("Score: 0", 38.0, &font, Color(120, 70, 30, 255)));
-/// ```
 pub fn make_text(text: impl Into<String>, font_size: f32, font: &Font, color: Color) -> TextSpec {
     make_text_aligned(text, font_size, font, color, Align::Center)
 }
 
-/// Like `make_text` but with explicit alignment.
-///
-/// ```rust
-/// obj.set_text(make_text_aligned("Hi", 38.0, &font, Color(255,255,255,255), Align::Left));
-/// ```
 pub fn make_text_aligned(
-    text: impl Into<String>,
+    text:      impl Into<String>,
     font_size: f32,
-    font: &Font,
-    color: Color,
-    align: Align,
+    font:      &Font,
+    color:     Color,
+    align:     Align,
 ) -> TextSpec {
     TextSpec::new(vec![
         SpanSpec {
@@ -79,7 +93,6 @@ pub fn make_text_aligned(
     ], align)
 }
 
-/// Build a multi-span TextSpec from a list of (text, font_size, font, color) tuples.
 pub fn make_text_multi(spans: Vec<(String, f32, Font, Color)>, align: Align) -> TextSpec {
     TextSpec::new(
         spans.into_iter().map(|(text, font_size, font, color)| SpanSpec {

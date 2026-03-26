@@ -1,27 +1,16 @@
 use super::*;
-use super::sound::{SoundOptions, SoundHandle, spawn_sound};
-use crate::entropy::Entropy;
+use crate::sound::spawn_sound;
 use std::cell::Cell;
-
-use crate::game_object::{Location, Condition, GameEvent, Target};
-use crate::object_store::ObjectStore;
-use crate::callbacks::CallbackStore;
-use crate::input::InputState;
-use crate::mouse::MouseState;
-
-// ---------------------------------------------------------------------------
-// Canvas impl
-// ---------------------------------------------------------------------------
 
 impl Canvas {
     pub fn new(_ctx: &mut Context, mode: CanvasMode) -> Self {
         let virtual_res = mode.virtual_resolution().unwrap_or((0.0, 0.0));
         Self {
             layout: CanvasLayout {
-                offsets: Vec::new(),
-                canvas_size: Cell::new(virtual_res),
+                offsets:          Vec::new(),
+                canvas_size:      Cell::new(virtual_res),
                 mode,
-                scale: Cell::new(1.0),
+                scale:            Cell::new(1.0),
                 safe_area_offset: Cell::new((0.0, 0.0)),
             },
             store:         ObjectStore::new(),
@@ -222,10 +211,6 @@ impl Canvas {
         spawn_sound(file_path, options)
     }
 
-    // -------------------------------------------------------------------------
-    // Internal
-    // -------------------------------------------------------------------------
-
     pub(crate) fn check_collision(o1: &GameObject, o2: &GameObject) -> bool {
         if !o1.visible || !o2.visible { return false; }
         o1.position.0 < o2.position.0 + o2.size.0
@@ -286,7 +271,6 @@ impl Canvas {
                 obj.update_image_shape();
             }
 
-            // Rebuild text with correct scaled font sizes every tick
             obj.update_text_scale(scale);
 
             if obj.visible {
@@ -393,7 +377,6 @@ impl Canvas {
         }
     }
 }
-
 
 impl Location {
     pub(crate) fn resolve_position(&self, store: &ObjectStore) -> (f32, f32) {

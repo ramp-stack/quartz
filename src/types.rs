@@ -1,5 +1,105 @@
-use super::action::Action;
-use super::target::Target;
+use crate::object::GameObject;
+
+#[derive(Debug, Clone)]
+pub enum Target {
+    ByName(String),
+    ById(String),
+    ByTag(String),
+}
+
+impl Target {
+    pub fn name(s: impl Into<String>) -> Self { Target::ByName(s.into()) }
+    pub fn id(s: impl Into<String>)   -> Self { Target::ById(s.into()) }
+    pub fn tag(s: impl Into<String>)  -> Self { Target::ByTag(s.into()) }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Anchor {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone)]
+pub enum Location {
+    Position((f32, f32)),
+    Between(Box<Target>, Box<Target>),
+    AtTarget(Box<Target>),
+    Relative {
+        target: Box<Target>,
+        offset: (f32, f32),
+    },
+    OnTarget {
+        target: Box<Target>,
+        anchor: Anchor,
+        offset: (f32, f32),
+    },
+}
+
+impl Location {
+    pub fn at(x: f32, y: f32) -> Self {
+        Location::Position((x, y))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Condition {
+    Always,
+    KeyHeld(prism::event::Key),
+    KeyNotHeld(prism::event::Key),
+    Collision(Target),
+    NoCollision(Target),
+    And(Box<Condition>, Box<Condition>),
+    Or(Box<Condition>, Box<Condition>),
+    Not(Box<Condition>),
+    IsVisible(Target),
+    IsHidden(Target),
+}
+
+#[derive(Clone, Debug)]
+pub enum Action {
+    ApplyMomentum {
+        target: Target,
+        value:  (f32, f32),
+    },
+    SetMomentum {
+        target: Target,
+        value:  (f32, f32),
+    },
+    Spawn {
+        object:   Box<GameObject>,
+        location: Location,
+    },
+    SetResistance {
+        target: Target,
+        value:  (f32, f32),
+    },
+    Remove {
+        target: Target,
+    },
+    TransferMomentum {
+        from:  Target,
+        to:    Target,
+        scale: f32,
+    },
+    SetAnimation {
+        target:          Target,
+        animation_bytes: &'static [u8],
+        fps:             f32,
+    },
+    Teleport {
+        target:   Target,
+        location: Location,
+    },
+    Show      { target: Target },
+    Hide      { target: Target },
+    Toggle    { target: Target },
+    Conditional {
+        condition: Condition,
+        if_true:   Box<Action>,
+        if_false:  Option<Box<Action>>,
+    },
+    Custom { name: String },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MouseButton {
@@ -17,83 +117,35 @@ pub enum ScrollAxis {
 }
 
 pub enum GameEvent {
-    Collision {
-        action: Action,
-        target: Target,
-    },
-    BoundaryCollision {
-        action: Action,
-        target: Target,
-    },
-    KeyPress {
-        key: prism::event::Key,
-        action: Action,
-        target: Target,
-    },
-    KeyRelease {
-        key: prism::event::Key,
-        action: Action,
-        target: Target,
-    },
-    KeyHold {
-        key: prism::event::Key,
-        action: Action,
-        target: Target,
-    },
-    Tick {
-        action: Action,
-        target: Target,
-    },
-    Custom {
-        name: String,
-        target: Target,
-    },
-    MousePress {
-        action: Action,
-        target: Target,
-        button: Option<MouseButton>,
-    },
-    MouseRelease {
-        action: Action,
-        target: Target,
-        button: Option<MouseButton>,
-    },
-    MouseEnter {
-        action: Action,
-        target: Target,
-    },
-    MouseLeave {
-        action: Action,
-        target: Target,
-    },
-    MouseOver {
-        action: Action,
-        target: Target,
-    },
-    MouseScroll {
-        action: Action,
-        target: Target,
-        axis: Option<ScrollAxis>,
-    },
-    MouseMove {
-        action: Action,
-        target: Target,
-    },
+    Collision        { action: Action, target: Target },
+    BoundaryCollision{ action: Action, target: Target },
+    KeyPress         { key: prism::event::Key, action: Action, target: Target },
+    KeyRelease       { key: prism::event::Key, action: Action, target: Target },
+    KeyHold          { key: prism::event::Key, action: Action, target: Target },
+    Tick             { action: Action, target: Target },
+    Custom           { name: String, target: Target },
+    MousePress       { action: Action, target: Target, button: Option<MouseButton> },
+    MouseRelease     { action: Action, target: Target, button: Option<MouseButton> },
+    MouseEnter       { action: Action, target: Target },
+    MouseLeave       { action: Action, target: Target },
+    MouseOver        { action: Action, target: Target },
+    MouseScroll      { action: Action, target: Target, axis: Option<ScrollAxis> },
+    MouseMove        { action: Action, target: Target },
 }
 
 impl GameEvent {
-    pub fn is_key_press(&self) -> bool    { matches!(self, GameEvent::KeyPress    { .. }) }
-    pub fn is_key_release(&self) -> bool  { matches!(self, GameEvent::KeyRelease  { .. }) }
-    pub fn is_key_hold(&self) -> bool     { matches!(self, GameEvent::KeyHold     { .. }) }
-    pub fn is_tick(&self) -> bool         { matches!(self, GameEvent::Tick        { .. }) }
-    pub fn is_custom(&self) -> bool       { matches!(self, GameEvent::Custom      { .. }) }
-    pub fn is_mouse_press(&self) -> bool  { matches!(self, GameEvent::MousePress  { .. }) }
-    pub fn is_mouse_release(&self) -> bool{ matches!(self, GameEvent::MouseRelease{ .. }) }
-    pub fn is_mouse_enter(&self) -> bool  { matches!(self, GameEvent::MouseEnter  { .. }) }
-    pub fn is_mouse_leave(&self) -> bool  { matches!(self, GameEvent::MouseLeave  { .. }) }
-    pub fn is_mouse_over(&self) -> bool   { matches!(self, GameEvent::MouseOver   { .. }) }
+    pub fn is_key_press(&self)    -> bool { matches!(self, GameEvent::KeyPress    { .. }) }
+    pub fn is_key_release(&self)  -> bool { matches!(self, GameEvent::KeyRelease  { .. }) }
+    pub fn is_key_hold(&self)     -> bool { matches!(self, GameEvent::KeyHold     { .. }) }
+    pub fn is_tick(&self)         -> bool { matches!(self, GameEvent::Tick        { .. }) }
+    pub fn is_custom(&self)       -> bool { matches!(self, GameEvent::Custom      { .. }) }
+    pub fn is_mouse_press(&self)  -> bool { matches!(self, GameEvent::MousePress  { .. }) }
+    pub fn is_mouse_release(&self)-> bool { matches!(self, GameEvent::MouseRelease{ .. }) }
+    pub fn is_mouse_enter(&self)  -> bool { matches!(self, GameEvent::MouseEnter  { .. }) }
+    pub fn is_mouse_leave(&self)  -> bool { matches!(self, GameEvent::MouseLeave  { .. }) }
+    pub fn is_mouse_over(&self)   -> bool { matches!(self, GameEvent::MouseOver   { .. }) }
     pub fn is_mouse_scroll(&self) -> bool { matches!(self, GameEvent::MouseScroll { .. }) }
-    pub fn is_mouse_move(&self) -> bool   { matches!(self, GameEvent::MouseMove   { .. }) }
+    pub fn is_mouse_move(&self)   -> bool { matches!(self, GameEvent::MouseMove   { .. }) }
 
     pub fn key(&self) -> Option<&prism::event::Key> {
         match self {

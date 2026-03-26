@@ -7,30 +7,52 @@ pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
 
+// ---------------------------------------------------------------------------
+// Modules
+// ---------------------------------------------------------------------------
+
 pub mod entropy;
-pub mod game_object;
-mod animation;
-mod text;
-mod apis;
-mod sound;
-mod scene;
-mod camera;
-pub mod object_store;
+pub mod lerp;
+pub mod object;
+pub mod types;
+pub mod sprite;
+pub mod text;
+
+pub mod sound;
+pub mod scene;
+pub mod camera;
+pub mod store;
 pub mod input;
-pub mod callbacks;
-pub mod mouse;
-pub use game_object::{GameObject, GameObjectBuilder, Target, Location, Anchor, Condition, Action, GameEvent, MouseButton, ScrollAxis};
-pub use animation::{AnimatedSprite, load_image, load_image_sized, flip_horizontal, flip_vertical, rotate_cw, rotate_ccw, rotate_180};
+pub mod canvas;
+
+// ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
+
+pub use types::{
+    Action, Condition, GameEvent,
+    Target, Location, Anchor,
+    MouseButton, ScrollAxis,
+};
+pub use object::{GameObject, GameObjectBuilder};
+pub use sprite::{
+    AnimatedSprite, RotationOptions, RotationDirection,
+    load_image, load_image_sized,
+    flip_horizontal, flip_vertical,
+    rotate_cw, rotate_ccw, rotate_180,
+};
 pub use scene::{Scene, SceneManager};
 pub use camera::Camera;
-pub use mouse::{MouseCallback, MouseMoveCallback, MouseScrollCallback, MouseState};
-pub use input::{InputState, Callback};
-pub use callbacks::{CallbackStore, EventCallback};
-pub use object_store::ObjectStore;
+pub use store::ObjectStore;
+pub use input::{InputState, Callback, MouseState, MouseCallback, MouseMoveCallback, MouseScrollCallback, CallbackStore, EventCallback};
 pub use sound::{SoundOptions, SoundHandle};
 pub use entropy::Entropy;
 pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
+pub use lerp::Lerp;
 
+// ---------------------------------------------------------------------------
+// CanvasMode
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
@@ -40,15 +62,15 @@ pub enum CanvasMode {
 }
 
 impl CanvasMode {
-    fn aspect_ratio(&self) -> f32 {
+    pub(crate) fn aspect_ratio(&self) -> f32 {
         match self {
             CanvasMode::Landscape  => 16.0 / 9.0,
-            CanvasMode::Portrait   => 9.0 / 16.0,
+            CanvasMode::Portrait   => 9.0  / 16.0,
             CanvasMode::Fullscreen => 1.0,
         }
     }
 
-    fn virtual_resolution(&self) -> Option<(f32, f32)> {
+    pub(crate) fn virtual_resolution(&self) -> Option<(f32, f32)> {
         match self {
             CanvasMode::Landscape  => Some((3840.0, 2160.0)),
             CanvasMode::Portrait   => Some((2160.0, 3840.0)),
@@ -56,6 +78,10 @@ impl CanvasMode {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// CanvasLayout
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct CanvasLayout {
@@ -102,23 +128,27 @@ impl Layout for CanvasLayout {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Canvas
+// ---------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct Canvas {
-    layout:        CanvasLayout,
-    store:         ObjectStore,
-    input:         InputState,
-    pub mouse:     MouseState,
-    callbacks:     CallbackStore,
-    scene_manager: SceneManager,
-    active_camera: Option<Camera>,
-    pub entropy: Entropy,
+    pub(crate) layout:        CanvasLayout,
+    pub(crate) store:         ObjectStore,
+    pub(crate) input:         InputState,
+    pub        mouse:         MouseState,
+    pub(crate) callbacks:     CallbackStore,
+    pub(crate) scene_manager: SceneManager,
+    pub(crate) active_camera: Option<Camera>,
+    pub        entropy:       Entropy,
 }
 
 impl std::fmt::Debug for Canvas {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Canvas")
-            .field("layout", &self.layout)
-            .field("store",  &self.store)
+            .field("layout",         &self.layout)
+            .field("store",          &self.store)
             .field("mouse_position", &self.mouse.position)
             .finish()
     }
@@ -126,15 +156,11 @@ impl std::fmt::Debug for Canvas {
 
 impl Component for Canvas {
     fn children(&self) -> Vec<&dyn Drawable> {
-        self.store.objects.iter()
-            .map(|o| o as &dyn Drawable)
-            .collect()
+        self.store.objects.iter().map(|o| o as &dyn Drawable).collect()
     }
 
     fn children_mut(&mut self) -> Vec<&mut dyn Drawable> {
-        self.store.objects.iter_mut()
-            .map(|o| o as &mut dyn Drawable)
-            .collect()
+        self.store.objects.iter_mut().map(|o| o as &mut dyn Drawable).collect()
     }
 
     fn layout(&self) -> &dyn Layout {
@@ -145,7 +171,7 @@ impl Component for Canvas {
 impl OnEvent for Canvas {
     fn on_event(
         &mut self,
-        _ctx: &mut Context,
+        _ctx:  &mut Context,
         _tree: &SizedTree,
         event: Box<dyn Event>,
     ) -> Vec<Box<dyn Event>> {
@@ -160,6 +186,7 @@ impl OnEvent for Canvas {
         if let Some(_tick) = event.downcast_ref::<TickEvent>() {
             const DELTA_TIME: f32 = 0.016;
 
+            // User tick callbacks
             let mut tick_cbs = std::mem::take(&mut self.callbacks.tick);
             tick_cbs.iter_mut().for_each(|cb| cb(self));
             self.callbacks.tick = tick_cbs;
@@ -167,11 +194,13 @@ impl OnEvent for Canvas {
             self.process_held_key_events();
             self.process_all_tick_events();
 
+            // MouseOver events
             if let Some(pos) = self.mouse.position {
                 let vpos = self.screen_to_virtual(pos);
                 self.process_mouse_over_events(vpos);
             }
 
+            // Custom event handlers attached to objects
             let custom_names: Vec<String> = self.store.events.iter()
                 .flatten()
                 .filter_map(|e| {
@@ -199,6 +228,10 @@ impl OnEvent for Canvas {
 }
 
 impl Canvas {
+    pub fn canvas_size(&self) -> (f32, f32) {
+        self.layout.canvas_size.get()
+    }
+
     pub(crate) fn screen_to_virtual(&self, screen_pos: (f32, f32)) -> (f32, f32) {
         let scale = self.layout.scale.get();
         let (pad_x, pad_y) = self.layout.safe_area_offset.get();

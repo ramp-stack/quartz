@@ -3,35 +3,29 @@ use prism::drawable::{Drawable, Component, SizedTree};
 use prism::Context;
 use prism::layout::{Area, SizeRequest};
 use prism::canvas::{Image, ShapeType, Text};
-use crate::text::{TextSpec};
-
+use crate::text::TextSpec;
+use crate::sprite::AnimatedSprite;
+use crate::types::Anchor;
 use std::cell::Cell;
-
-use crate::animation::AnimatedSprite;
-use super::target::Anchor;
-
-// ---------------------------------------------------------------------------
-// GameObject
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
 pub struct GameObject {
-    layout: prism::layout::Stack,
-    pub id: String,
-    pub tags: Vec<String>,
-    drawable: Option<Box<dyn Drawable>>,
+    layout:           prism::layout::Stack,
+    pub id:           String,
+    pub tags:         Vec<String>,
+    drawable:         Option<Box<dyn Drawable>>,
     pub animated_sprite: Option<AnimatedSprite>,
-    pub size: (f32, f32),
-    pub position: (f32, f32),
-    pub momentum: (f32, f32),
-    pub resistance: (f32, f32),
-    pub gravity: f32,
-    pub scaled_size: Cell<(f32, f32)>,
-    pub is_platform: bool,
-    pub visible: bool,
-    pub layer: Option<u32>,
-    /// Stored so the engine can rebuild a scaled Text every tick.
-    text_spec: Option<TextSpec>,
+    pub size:         (f32, f32),
+    pub position:     (f32, f32),
+    pub momentum:     (f32, f32),
+    pub resistance:   (f32, f32),
+    pub gravity:      f32,
+    pub scaled_size:  Cell<(f32, f32)>,
+    pub is_platform:  bool,
+    pub visible:      bool,
+    pub layer:        Option<u32>,
+    text_spec:        Option<TextSpec>,
+    last_text_scale:  Cell<f32>,  // cached scale — rebuild only when changed
 }
 
 impl OnEvent for GameObject {}
@@ -39,7 +33,7 @@ impl OnEvent for GameObject {}
 impl Component for GameObject {
     fn children(&self) -> Vec<&dyn Drawable> {
         if self.visible {
-            self.drawable.as_ref().map(|img| vec![img as &dyn Drawable]).unwrap_or_default()
+            self.drawable.as_ref().map(|d| vec![d as &dyn Drawable]).unwrap_or_default()
         } else {
             vec![]
         }
@@ -47,7 +41,7 @@ impl Component for GameObject {
 
     fn children_mut(&mut self) -> Vec<&mut dyn Drawable> {
         if self.visible {
-            self.drawable.as_mut().map(|img| vec![img as &mut dyn Drawable]).unwrap_or_default()
+            self.drawable.as_mut().map(|d| vec![d as &mut dyn Drawable]).unwrap_or_default()
         } else {
             vec![]
         }
@@ -86,21 +80,22 @@ impl GameObject {
         gravity: f32,
     ) -> Self {
         Self {
-            layout: prism::layout::Stack::default(),
+            layout:          prism::layout::Stack::default(),
             id,
             tags,
-            drawable: drawable.map(|d| Box::new(d) as Box<dyn Drawable>),
+            drawable:        drawable.map(|d| Box::new(d) as Box<dyn Drawable>),
             animated_sprite: None,
-            size: (size, size),
+            size:            (size, size),
             position,
             momentum,
             resistance,
             gravity,
-            scaled_size: Cell::new((size, size)),
-            is_platform: false,
-            visible: true,
-            layer: None,
-            text_spec: None,
+            scaled_size:     Cell::new((size, size)),
+            is_platform:     false,
+            visible:         true,
+            layer:           None,
+            text_spec:       None,
+            last_text_scale: Cell::new(0.0),
         }
     }
 
@@ -116,21 +111,22 @@ impl GameObject {
         gravity: f32,
     ) -> Self {
         Self {
-            layout: prism::layout::Stack::default(),
+            layout:          prism::layout::Stack::default(),
             id,
             tags,
-            drawable: drawable.map(|d| Box::new(d) as Box<dyn Drawable>),
+            drawable:        drawable.map(|d| Box::new(d) as Box<dyn Drawable>),
             animated_sprite: None,
             size,
             position,
             momentum,
             resistance,
             gravity,
-            scaled_size: Cell::new(size),
-            is_platform: false,
-            visible: true,
-            layer: None,
-            text_spec: None,
+            scaled_size:     Cell::new(size),
+            is_platform:     false,
+            visible:         true,
+            layer:           None,
+            text_spec:       None,
+            last_text_scale: Cell::new(0.0),
         }
     }
 
@@ -184,15 +180,23 @@ impl GameObject {
 
     pub fn set_image(&mut self, image: Image) {
         self.text_spec = None;
+        self.last_text_scale.set(0.0);
         self.drawable  = Some(Box::new(image));
     }
 
-    /// Set text on this object. Font sizes in the spec are in virtual pixels
-    /// and are automatically scaled with the canvas every tick.
     pub fn set_text(&mut self, spec: TextSpec) {
-        let text       = spec.build(1.0);
+        // Build at scale 1.0 initially; update_text_scale will correct it on
+        // the next tick if the canvas scale differs.
+        let text = spec.build(1.0);
+        self.last_text_scale.set(0.0); // force rebuild on next tick
         self.text_spec = Some(spec);
         self.drawable  = Some(Box::new(text));
+    }
+
+    pub fn set_drawable(&mut self, drawable: Box<dyn prism::drawable::Drawable>) {
+        self.text_spec = None;
+        self.last_text_scale.set(0.0);
+        self.drawable  = Some(drawable);
     }
 
     pub fn update_position(&mut self) {
@@ -231,13 +235,17 @@ impl GameObject {
         }
     }
 
-    /// Rebuild the Text drawable with all font sizes multiplied by `scale`.
-    /// No-op when the object was set with set_text (unmanaged Text).
+    /// Only rebuilds the Text drawable when `scale` differs from the last
+    /// value it was built with. On idle frames this is a single float compare.
     pub(crate) fn update_text_scale(&mut self, scale: f32) {
+        if self.text_spec.is_none() { return; }
+        if (self.last_text_scale.get() - scale).abs() < 0.0001 { return; }
+
         if let Some(spec) = &self.text_spec {
             let text = spec.build(scale);
             self.drawable = Some(Box::new(text));
         }
+        self.last_text_scale.set(scale);
     }
 
     pub fn check_boundary_collision(&self, canvas_size: (f32, f32)) -> bool {
@@ -261,10 +269,6 @@ impl GameObject {
             && point.1 <= self.position.1 + self.size.1
     }
 }
-
-// ---------------------------------------------------------------------------
-// GameObjectBuilder
-// ---------------------------------------------------------------------------
 
 pub struct GameObjectBuilder {
     id:          String,
@@ -347,6 +351,7 @@ impl GameObjectBuilder {
             visible:         true,
             layer:           self.layer,
             text_spec:       None,
+            last_text_scale: Cell::new(0.0),
         }
     }
 }
