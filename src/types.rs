@@ -1,4 +1,7 @@
 use crate::object::GameObject;
+use crate::value::{Expr, MathOp, CompOp};
+use crate::sound::SoundOptions;
+use prism::canvas::Text;
 
 #[derive(Debug, Clone)]
 pub enum Target {
@@ -53,6 +56,11 @@ pub enum Condition {
     Not(Box<Condition>),
     IsVisible(Target),
     IsHidden(Target),
+    Compare(Expr, CompOp, Expr),
+    VarExists(String),
+    Grounded(Target),
+    Expr(String),
+    HasTag(Target, String),
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +107,102 @@ pub enum Action {
         if_false:  Option<Box<Action>>,
     },
     Custom { name: String },
+    SetVar {
+        name:  String,
+        value: Expr,
+    },
+    ModVar {
+        name:    String,
+        op:      MathOp,
+        operand: Expr,
+    },
+    Multi(Vec<Action>),
+    PlaySound {
+        path:    String,
+        options: SoundOptions,
+    },
+    SetGravity {
+        target: Target,
+        value:  f32,
+    },
+    SetSize {
+        target: Target,
+        value:  (f32, f32),
+    },
+    AddTag {
+        target: Target,
+        tag:    String,
+    },
+    RemoveTag {
+        target: Target,
+        tag:    String,
+    },
+    SetText {
+        target: Target,
+        text:   Text,
+    },
+    Expr(String),
+    SetRotation {
+        target: Target,
+        value:  f32,
+    },
+    SetSlope {
+        target:       Target,
+        left_offset:  f32,
+        right_offset: f32,
+        auto_rotate:  bool,
+    },
+    AddRotation {
+        target: Target,
+        value:  f32,
+    },
+    ApplyRotation {
+        target: Target,
+        value:  f32,
+    },
+    SetSurfaceNormal {
+        target: Target,
+        nx:     f32,
+        ny:     f32,
+    },
+}
+
+impl Action {
+    pub fn expr(s: impl Into<String>) -> Self { Action::Expr(s.into()) }
+
+    pub fn when(cond: Condition, if_true: Action, if_false: Option<Action>) -> Self {
+        Action::Conditional {
+            condition: cond,
+            if_true:   Box::new(if_true),
+            if_false:  if_false.map(Box::new),
+        }
+    }
+
+    pub fn multi(actions: Vec<Action>) -> Self { Action::Multi(actions) }
+
+    pub fn set_var(name: impl Into<String>, value: Expr) -> Self {
+        Action::SetVar { name: name.into(), value }
+    }
+
+    pub fn apply_momentum(target: Target, x: f32, y: f32) -> Self {
+        Action::ApplyMomentum { target, value: (x, y) }
+    }
+}
+
+impl Condition {
+    pub fn expr(s: impl Into<String>) -> Self { Condition::Expr(s.into()) }
+
+    pub fn and(a: Condition, b: Condition) -> Self {
+        Condition::And(Box::new(a), Box::new(b))
+    }
+
+    pub fn or(a: Condition, b: Condition) -> Self {
+        Condition::Or(Box::new(a), Box::new(b))
+    }
+
+    pub fn not(c: Condition) -> Self {
+        Condition::Not(Box::new(c))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

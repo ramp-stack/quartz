@@ -2,6 +2,7 @@ use prism::event::{OnEvent, Event, TickEvent, KeyboardEvent};
 use prism::drawable::{Component, Drawable, SizedTree};
 use prism::layout::{Area, SizeRequest, Layout};
 use std::cell::Cell;
+use std::collections::HashMap;
 
 pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
@@ -26,6 +27,7 @@ pub mod camera;
 pub mod store;
 pub mod input;
 pub mod canvas;
+pub mod expr;
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -48,6 +50,7 @@ pub use camera::Camera;
 pub use store::ObjectStore;
 pub use input::{InputState, Callback, MouseState, MouseCallback, MouseMoveCallback, MouseScrollCallback, CallbackStore, EventCallback};
 pub use sound::{SoundOptions, SoundHandle};
+pub use expr::{parse_condition, parse_action};
 pub use entropy::Entropy;
 pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
 pub use lerp::Lerp;
@@ -144,6 +147,8 @@ pub struct Canvas {
     pub(crate) scene_manager: SceneManager,
     pub(crate) active_camera: Option<Camera>,
     pub        entropy:       Entropy,
+    pub        game_vars:     HashMap<String, value::Value>,
+    paused:                   bool,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -186,6 +191,7 @@ impl OnEvent for Canvas {
         }
 
         if let Some(_tick) = event.downcast_ref::<TickEvent>() {
+            if self.paused { return vec![event]; }
             const DELTA_TIME: f32 = 0.016;
 
             // User tick callbacks
@@ -223,6 +229,16 @@ impl OnEvent for Canvas {
 
             self.update_objects(DELTA_TIME);
             self.handle_collisions();
+
+            let canvas_size = self.layout.canvas_size.get();
+            let boundary_indices: Vec<usize> = self.store.objects.iter()
+                .enumerate()
+                .filter(|(_, obj)| obj.visible && obj.check_boundary_collision(canvas_size))
+                .map(|(i, _)| i)
+                .collect();
+            for idx in boundary_indices {
+                self.trigger_boundary_collision_events(idx);
+            }
         }
 
         vec![event]

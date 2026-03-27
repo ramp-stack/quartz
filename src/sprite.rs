@@ -130,6 +130,33 @@ impl AnimatedSprite {
             return Err("GIF has no frames".to_string());
         }
 
+        // Fit each frame within the requested display size, preserving the
+        // GIF's native aspect ratio (uniform scale), then center on a
+        // transparent canvas sized to the display dimensions. This ensures:
+        //   1) pixel size == display size → the renderer never UV-crops
+        //   2) proportions are preserved across animations of different
+        //      native dimensions (idle 38×59, running 43×60, walking 32×60
+        //      all produce the same character scale inside e.g. 200×200)
+        //   3) transparent padding fills unused space
+        let tw = size.0.round().max(1.0) as u32;
+        let th = size.1.round().max(1.0) as u32;
+        frames = frames.into_iter().map(|f| {
+            let fw = f.width();
+            let fh = f.height();
+            if fw == tw && fh == th { return f; }
+
+            let scale = (tw as f32 / fw as f32).min(th as f32 / fh as f32);
+            let rw = (fw as f32 * scale).round().max(1.0) as u32;
+            let rh = (fh as f32 * scale).round().max(1.0) as u32;
+            let resized = imageops::resize(&f, rw, rh, imageops::FilterType::Nearest);
+
+            let mut canvas = RgbaImage::from_pixel(tw, th, image::Rgba([0, 0, 0, 0]));
+            let ox = tw.saturating_sub(rw) / 2;
+            let oy = th.saturating_sub(rh) / 2;
+            imageops::overlay(&mut canvas, &resized, ox as i64, oy as i64);
+            canvas
+        }).collect();
+
         Ok(Self::from_frames(frames, size, fps))
     }
 
