@@ -1,6 +1,135 @@
-use prism::canvas::{Image, ShapeType};
-use image::{RgbaImage, AnimationDecoder, imageops};
+use prism::canvas::{Image, ShapeType, Color};
+use image::{RgbaImage, Rgba, AnimationDecoder, imageops};
 use std::io::Cursor;
+use prism::drawable::{Drawable, SizedTree, Rect};
+
+
+
+pub fn solid_circle(size: f32, color: Color) -> Image {
+    Image {
+        shape: ShapeType::RoundedRectangle(0.0, (size, size), 0.0, size * 0.5),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
+pub fn planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image {
+    Image {
+        shape: ShapeType::Rectangle(0.0, (size, size), 0.0),
+        image: generate_planet_rgba(radius, r, g, b, 1.0).into(),
+        color: None,
+    }
+}
+
+pub fn planet_grayscale(radius: u32, size: f32) -> Image {
+    Image {
+        shape: ShapeType::Rectangle(0.0, (size, size), 0.0),
+        image: generate_planet_rgba(radius, 255, 255, 255, 1.0).into(),
+        color: None,
+    }
+}
+
+pub fn with_tint(image: &Image, color: Color) -> Image {
+    Image {
+        shape: image.shape.clone(),
+        image: image.image.clone(),
+        color: Some(color),
+    }
+}
+
+pub fn planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size: f32) -> Image {
+    let rf = radius as f32;
+    let atm_px = rf * atmosphere.clamp(0.0, 1.0);
+    let outer_r = rf + atm_px;
+    let diameter = (outer_r * 2.0).ceil().max(1.0) as u32;
+    let mut img = RgbaImage::new(diameter, diameter);
+    let cx = outer_r;
+
+    for py in 0..diameter {
+        for px in 0..diameter {
+            let dx = px as f32 - cx + 0.5;
+            let dy = py as f32 - cx + 0.5;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            let (alpha, brightness) = if dist <=rf {
+                let rim = ((rf - dist) / rf).min(1.0);
+                (255u8, 0.7 + 0.3 * rim)
+            } else if atm_px > 0.0 && dist <= rf + atm_px {
+                let t = (dist - rf) / atm_px;
+                let alpha = ((1.0 - t) * 180.0) as u8;
+                (alpha, 0.6 + 0.15 * (1.0 - t))
+            } else {
+                continue;                
+            };
+
+            img.put_pixel(px, py, Rgba([
+                (r as f32 * brightness).min(255.0) as u8,
+                (g as f32 * brightness).min(255.0) as u8,
+                (b as f32 * brightness).min(255.0) as u8,
+                alpha,
+            ]));
+        }
+    }
+
+    Image {
+        shape: ShapeType::Rectangle(0.0, (size, size), 0.0),
+        image: img.into(),
+        color: None,
+    }
+}
+
+pub fn glow_ring(w: f32, h: f32, ring_width: f32, corner_radius: f32, color: Color) -> Image {
+    let total_w = w + 2.0 * ring_width;
+    let total_h = h + 2.0 * ring_width;
+    Image {
+        shape: ShapeType::RoundedRectangle(
+            ring_width,
+            (total_w, total_h),
+            0.0,
+            corner_radius + ring_width * 0.5,
+        ),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
+pub fn tint_overlay(w: f32, h: f32, color: Color) -> Image {
+    Image {
+        shape: ShapeType::Rectangle(0.0, (w, h), 0.0),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
+pub(crate) fn generate_planet_rgba(radius: u32, r: u8, g: u8, b: u8, brightness_scale: f32,) -> RgbaImage {
+    let diameter = radius * 2;
+    let mut img = RgbaImage::new(diameter, diameter);
+    let cx = radius as f32;
+    let rf = radius as f32;
+
+    for py in 0..diameter {
+        for px in 0..diameter {
+            let dx = px as f32 - cx + 0.5;
+            let dy = py as f32 - cx + 0.5;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist > rf { continue; }
+
+            let rim = ((rf - dist) / rf).min(1.0);
+            let brightness = (0.7 + 0.3 * rim) * brightness_scale;
+
+            img.put_pixel(px, py, Rgba([
+                (r as f32 * brightness).min(255.0) as u8,
+                (g as f32 * brightness).min(255.0) as u8,
+                (b as f32 * brightness).min(255.0) as u8,
+                255,                
+            ]));
+        }
+    }
+
+    img
+
+}
 
 pub fn load_image(path: &str) -> Image {
     let rgba = image::open(path)
@@ -257,3 +386,4 @@ impl std::fmt::Debug for AnimatedSprite {
             .finish()
     }
 }
+

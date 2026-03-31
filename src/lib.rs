@@ -36,11 +36,17 @@ pub mod expr;
 pub use types::{
     Action, Condition, GameEvent,
     Target, Location, Anchor,
+    CollisionMode, CollisionShape,
+    GlowConfig, HighlightEffect,
     MouseButton, ScrollAxis,
+    ConditionOps,
 };
 pub use object::{GameObject, GameObjectBuilder};
 pub use sprite::{
     AnimatedSprite, RotationOptions, RotationDirection,
+    solid_circle, planet_image,
+    planet_grayscale, with_tint,
+    planet_atmosphere, glow_ring, tint_overlay,
     load_image, load_image_sized,
     flip_horizontal, flip_vertical,
     rotate_cw, rotate_ccw, rotate_180,

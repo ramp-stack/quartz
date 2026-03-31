@@ -1,7 +1,8 @@
 use super::*;
 use crate::sound::spawn_sound;
-use crate::value::{Value, Expr, resolve_expr, apply_op, compare_operands, MathOp};
+use crate::value::{Value, Expr, resolve_expr, apply_op, compare_operands};
 use crate::expr::{parse_action, parse_condition};
+use crate::types::{CollisionMode, CollisionShape, GlowConfig};
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -255,6 +256,52 @@ impl Canvas {
                 let (nx, ny) = (nx / len, ny / len);
                 self.store.apply_to_targets(&target, |obj| obj.surface_normal = (nx, ny));
             }
+            Action::SetCollisionMode { target, mode } => {
+                let indices = self.store.get_indices(&target);
+                for idx in indices {
+                    if let Some(obj) = self.store.objects.get_mut(idx) {
+                        obj.collision_mode = mode.clone();
+                        match mode {
+                            CollisionMode::NonPlatform => { obj.is_platform = false; }
+                            CollisionMode::Surface | CollisionMode::Solid(_) => {
+                                obj.is_platform = true;
+                            }
+                        }
+                    }
+                }
+            }
+            Action::SetGlow { target, color, width } => {
+                let indices = self.store.get_indices(&target);
+                for idx in indices {
+                    if let Some(obj) = self.store.objects.get_mut(idx) {
+                        obj.set_glow(GlowConfig { color, width });
+                    }
+                }
+            }
+            Action::ClearGlow { target } => {
+                let indices = self.store.get_indices(&target);
+                for idx in indices {
+                    if let Some(obj) = self.store.objects.get_mut(idx) {
+                        obj.clear_glow();
+                    }
+                }
+            }
+            Action::SetTint { target, color } => {
+                let indices = self.store.get_indices(&target);
+                for idx in indices {
+                    if let Some(obj) = self.store.objects.get_mut(idx) {
+                        obj.set_tint(color);
+                    }
+                }
+            }
+            Action::ClearTint { target } => {
+                let indices = self.store.get_indices(&target);
+                for idx in indices {
+                    if let Some(obj) = self.store.objects.get_mut(idx) {
+                        obj.clear_tint();
+                    }
+                }
+            }
         }
     }
 
@@ -386,22 +433,7 @@ impl Canvas {
             Condition::VarExists(name) => self.game_vars.contains_key(name.as_str()),
             Condition::Grounded(target) => {
                 self.store.get_indices(target).iter().any(|&idx| {
-                    if let Some(obj) = self.store.objects.get(idx) {
-                        let obj_bottom = obj.position.1 + obj.size.1;
-                        let obj_center_x = obj.position.0 + obj.size.0 * 0.5;
-                        self.store.objects.iter().any(|other| {
-                            if !other.is_platform { return false; }
-                            let (_, eff_ny) = other.surface_normal_at(obj_center_x);
-                            if eff_ny >= -0.3 { return false; }
-                            if obj.position.0 + obj.size.0 <= other.position.0 { return false; }
-                            if obj.position.0 >= other.position.0 + other.size.0 { return false; }
-                            if obj.momentum.1 < 0.0 { return false; }
-                            let surface_y = other.slope_surface_y(obj_center_x);
-                            (obj_bottom - surface_y).abs() < 2.0
-                        })
-                    } else {
-                        false
-                    }
+                    self.store.objects.get(idx).map_or(false, |obj| obj.grounded)
                 })
             }
             Condition::Expr(src) => {
@@ -441,6 +473,7 @@ impl Canvas {
         let scale = self.layout.scale.get();
 
         for (idx, obj) in self.store.objects.iter_mut().enumerate() {
+            obj.grounded = false;
             obj.scaled_size.set((obj.size.0 * scale, obj.size.1 * scale));
             obj.update_animation(delta_time);
 
@@ -525,6 +558,40 @@ impl Canvas {
 
                 let obj_center_x = obj.position.0 + obj.size.0 * 0.5;
 
+                match &plat.collision_mode {
+                    CollisionMode::NonPlatform => {
+                        continue;
+                    }
+                    CollisionMode::Solid(shape) => {
+                        let result = match shape {
+                            CollisionShape::Rectangle => {
+                                resolve_solid_collision(obj, plat)
+                                    .map(|(dx, dy, _face)| (dx, dy))
+                            }
+                            CollisionShape::Circle { radius } => {
+                                resolve_circle_collision(obj, plat, radius)
+                            }
+                            // Future shapes (Capsule, RoundedRect, ConcaveMesh) will
+                            // add arms here. For now, fall back to Rectangle if an
+                            // unknown shape somehow appears.
+                        };
+                        if let Some((dx, dy)) = result {
+                            // Approach check: only resolve if object is moving into the face
+                            let dist = (dx * dx + dy * dy).sqrt().max(0.001);
+                            let nx = dx / dist;
+                            let ny = dy / dist;
+                            let approach = obj.momentum.0 * (-nx) + obj.momentum.1 * (-ny);
+                            if approach > 0.0 {
+                                adjustments.push((obj_idx, dx, dy, plat_idx));
+                            }
+                        }
+                        continue; // skip the Surface-mode resolution below
+                    }
+                    CollisionMode::Surface => {
+                        // Fall through to existing surface_normal resolution below
+                    }
+                }
+
                 let (mut nx, mut ny) = plat.surface_normal_at(obj_center_x);
 
                 // For rotating platforms (non-slope), always treat the upper
@@ -602,15 +669,24 @@ impl Canvas {
 
         for (obj_idx, dx, dy, plat_idx) in adjustments {
             let plat = &self.store.objects[plat_idx];
-            let (mut nx, mut ny) = plat.surface_normal;
-            let surf_vel  = plat.surface_velocity;
+            let (nx, ny) = match &plat.collision_mode {
+                CollisionMode::Surface => {
+                    let (mut nx, mut ny) = plat.surface_normal;
+                    let surf_vel = plat.surface_velocity;
+                    if plat.rotation != 0.0 && plat.slope.is_none() && ny > 0.0 {
+                        nx = -nx;
+                        ny = -ny;
+                    }
+                    (nx, ny)
+                }
+                _ => {
+                    // Normal from correction delta
+                    let dist = (dx * dx + dy * dy).sqrt().max(0.001);
+                    (dx / dist, dy / dist)
+                }
+            };
 
-            // Mirror the approach-check flip: rotated platforms always
-            // use the upward-facing normal for momentum cancellation.
-            if plat.rotation != 0.0 && plat.slope.is_none() && ny > 0.0 {
-                nx = -nx;
-                ny = -ny;
-            }
+            let surf_vel = plat.surface_velocity;
 
             let obj = &mut self.store.objects[obj_idx];
 
@@ -622,6 +698,10 @@ impl Canvas {
 
             obj.position.0 += dx;
             obj.position.1 += dy;
+
+            if ny < -0.3 {
+                obj.grounded = true;
+            }
 
             let adj = rotation_adjusted_offset(
                 obj.position, obj.size, obj.rotation, obj.slope.is_some(),
@@ -636,6 +716,7 @@ impl Canvas {
                 self.store.objects[obj_idx].momentum.1 +=  nx * vx;
             }
         }
+                
 
         for (i, j) in collision_pairs {
             self.trigger_collision_events(i);
@@ -667,72 +748,197 @@ impl Canvas {
 
     // ── game_vars accessors ──────────────────────────────────────────
 
-    pub fn set_var(&mut self, key: impl Into<String>, val: impl Into<value::Value>) {
-        self.game_vars.insert(key.into(), val.into());
+    pub fn set_var(&mut self, name: impl Into<String>, value: impl Into<Value>) {
+        self.game_vars.insert(name.into(), value.into());
     }
 
-    pub fn get_var(&self, key: &str) -> Option<&value::Value> {
-        self.game_vars.get(key)
+    pub fn get_var(&self, name: &str) -> Option<Value> {
+        self.game_vars.get(name).cloned()
     }
 
-    pub fn has_var(&self, key: &str) -> bool {
-        self.game_vars.contains_key(key)
+    pub fn has_var(&self, name: &str) -> bool {
+        self.game_vars.contains_key(name)
     }
 
-    pub fn remove_var(&mut self, key: &str) -> Option<value::Value> {
-        self.game_vars.remove(key)
+    pub fn remove_var(&mut self, name: &str) {
+        self.game_vars.remove(name);
     }
 
-    pub fn resolve(&self, key: &str) -> value::Value {
-        self.game_vars.get(key).cloned().unwrap_or(value::Value::F32(0.0))
+    pub fn resolve(&self, expr: &Expr) -> Option<Value> {
+        resolve_expr(expr, &self.game_vars)
     }
 
-    pub fn modify_var(&mut self, key: &str, op: value::MathOp, rhs: value::Value) {
-        let current = self.resolve(key);
-        let result  = value::apply_op(&current, &rhs, &op);
-        if let Some(val) = result {
-            self.game_vars.insert(key.to_string(), val);
+    pub fn modify_var(&mut self, name: &str, f: impl FnOnce(Value) -> Value) {
+        if let Some(val) = self.game_vars.remove(name) {
+            self.game_vars.insert(name.to_string(), f(val));
         }
     }
 
-    pub fn get_f32(&self, key: &str) -> f32 {
-        match self.game_vars.get(key) {
-            Some(value::Value::F32(v)) => *v,
-            Some(value::Value::F64(v)) => *v as f32,
-            Some(value::Value::I32(v)) => *v as f32,
-            _ => 0.0,
+    pub fn get_u8(&self, name: &str) -> u8 {
+        match self.game_vars.get(name) {
+            Some(Value::U8(v)) => *v,
+            Some(other) => panic!(
+                "game_var '{name}' expected U8 but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected U8 but key was missing"),
         }
     }
 
-    pub fn get_f64(&self, key: &str) -> f64 {
-        match self.game_vars.get(key) {
-            Some(value::Value::F64(v)) => *v,
-            Some(value::Value::F32(v)) => *v as f64,
-            Some(value::Value::I32(v)) => *v as f64,
-            _ => 0.0,
+    pub fn get_u32(&self, name: &str) -> u32 {
+        match self.game_vars.get(name) {
+            Some(Value::U32(v)) => *v,
+            Some(other) => panic!(
+                "game_var '{name}' expected U32 but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected U32 but key was missing"),
         }
     }
 
-    pub fn get_i32(&self, key: &str) -> i32 {
-        match self.game_vars.get(key) {
-            Some(value::Value::I32(v)) => *v,
-            Some(value::Value::F32(v)) => *v as i32,
-            _ => 0,
+    pub fn get_i32(&self, name: &str) -> i32 {
+        match self.game_vars.get(name) {
+            Some(Value::I32(v)) => *v,
+            Some(other) => panic!(
+                "game_var '{name}' expected I32 but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected I32 but key was missing"),
         }
     }
 
-    pub fn get_bool(&self, key: &str) -> bool {
-        match self.game_vars.get(key) {
-            Some(value::Value::Bool(v)) => *v,
-            _ => false,
+    pub fn get_f32(&self, name: &str) -> f32 {
+        match self.game_vars.get(name) {
+            Some(Value::F32(v)) => *v,
+            Some(other) => panic!(
+                "game_var '{name}' expected F32 but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected F32 but key was missing"),
         }
     }
 
-    pub fn get_str(&self, key: &str) -> String {
-        match self.game_vars.get(key) {
-            Some(value::Value::Str(s)) => s.clone(),
-            Some(v) => format!("{:?}", v),
-            None => String::new(),
+    pub fn get_bool(&self, name: &str) -> bool {
+        match self.game_vars.get(name) {
+            Some(Value::Bool(v)) => *v,
+            Some(other) => panic!(
+                "game_var '{name}' expected Bool but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected Bool but key was missing"),
+        }
+    }
+
+    pub fn get_usize(&self, name: &str) -> usize {
+        match self.game_vars.get(name) {
+            Some(Value::Usize(v)) => *v,
+            Some(other) => panic!(
+                "game_var '{name}' expected Usize but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected Usize but key was missing"),
+        }
+    }
+
+    pub fn get_str(&self, name: &str) -> &str {
+        match self.game_vars.get(name) {
+            Some(Value::Str(v)) => v.as_str(),
+            Some(other) => panic!(
+                "game_var '{name}' expected Str but found {}",
+                value_type_name(other)
+            ),
+            None => panic!("game_var '{name}' expected Str but key was missing"),
+        }
+    }
+
+    pub fn modify_u8(&mut self, name: &str, f: impl FnOnce(u8) -> u8) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::U8(n)) => {
+                self.game_vars.insert(name.to_string(), Value::U8(f(n)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected U8 for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected U8 for modify but key was missing"),
+        }
+    }
+
+    pub fn modify_u32(&mut self, name: &str, f: impl FnOnce(u32) -> u32) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::U32(n)) => {
+                self.game_vars.insert(name.to_string(), Value::U32(f(n)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected U32 for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected U32 for modify but key was missing"),
+        }
+    }
+
+    pub fn modify_i32(&mut self, name: &str, f: impl FnOnce(i32) -> i32) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::I32(n)) => {
+                self.game_vars.insert(name.to_string(), Value::I32(f(n)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected I32 for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected I32 for modify but key was missing"),
+        }
+    }
+
+    pub fn modify_f32(&mut self, name: &str, f: impl FnOnce(f32) -> f32) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::F32(n)) => {
+                self.game_vars.insert(name.to_string(), Value::F32(f(n)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected F32 for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected F32 for modify but key was missing"),
+        }
+    }
+
+    pub fn modify_bool(&mut self, name: &str, f: impl FnOnce(bool) -> bool) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::Bool(n)) => {
+                self.game_vars.insert(name.to_string(), Value::Bool(f(n)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected Bool for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected Bool for modify but key was missing"),
+        }
+    }
+
+    pub fn modify_usize(&mut self, name: &str, f: impl FnOnce(usize) -> usize) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::Usize(n)) => {
+                self.game_vars.insert(name.to_string(), Value::Usize(f(n)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected Usize for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected Usize for modify but key was missing"),
+        }
+    }
+
+    pub fn modify_str(&mut self, name: &str, f: impl FnOnce(String) -> String) {
+        match self.game_vars.get(name).cloned() {
+            Some(Value::Str(s)) => {
+                self.game_vars.insert(name.to_string(), Value::Str(f(s)));
+            }
+            Some(other) => panic!(
+                "game_var '{name}' expected Str for modify but found {}",
+                value_type_name(&other)
+            ),
+            None => panic!("game_var '{name}' expected Str for modify but key was missing"),
         }
     }
 
@@ -741,6 +947,24 @@ impl Canvas {
     pub fn pause(&mut self)  { self.paused = true; }
     pub fn resume(&mut self) { self.paused = false; }
     pub fn is_paused(&self) -> bool { self.paused }
+}
+
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::I8(_) => "I8",
+        Value::U8(_) => "U8",
+        Value::I16(_) => "I16",
+        Value::U16(_) => "U16",
+        Value::I32(_) => "I32",
+        Value::U32(_) => "U32",
+        Value::I64(_) => "I64",
+        Value::U64(_) => "U64",
+        Value::F32(_) => "F32",
+        Value::F64(_) => "F64",
+        Value::Usize(_) => "Usize",
+        Value::Bool(_) => "Bool",
+        Value::Str(_) => "Str",
+    }
 }
 
 impl Location {
@@ -851,4 +1075,107 @@ fn penetration_depth(
     let sep = (obj_cx - plat_cx) * nx + (obj_cy - plat_cy) * ny;
     let overlap = obj_half + plat_half - sep.abs();
     if overlap > 0.0 { overlap } else { 0.0 }
+}
+
+fn resolve_solid_collision(
+    obj: &object::GameObject,
+    plat: &object::GameObject,
+) -> Option<(f32, f32, u8)> {
+    let plat_cx = plat.position.0 + plat.size.0 * 0.5;
+    let plat_cy = plat.position.1 + plat.size.1 * 0.5;
+    let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+    let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+
+    let theta = -plat.rotation.to_radians();
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+
+    let rel_x = obj_cx - plat_cx;
+    let rel_y = obj_cy - plat_cy;
+    let local_x = rel_x * cos_t - rel_y * sin_t;
+    let local_y = rel_x * sin_t + rel_y * cos_t;
+
+    let half_pw = plat.size.0 * 0.5;
+    let half_ph = plat.size.1 * 0.5;
+    let half_ow = obj.size.0 * 0.5;
+    let half_oh = obj.size.1 * 0.5;
+
+    let overlap_x = (half_pw + half_ow) - local_x.abs();
+    let overlap_y = (half_ph + half_oh) - local_y.abs();
+
+    if overlap_x <= 0.0 || overlap_y <= 0.0 {
+        return None;        
+    }
+
+    let mut candidates: Vec<(f32, f32, f32, u8)> = Vec::with_capacity(4);
+
+    if local_y < 0.0 {
+        candidates.push((overlap_y, 0.0, -1.0, 0));
+    }
+
+    if local_y >= 0.0 {
+        candidates.push((overlap_y, 0.0, 1.0, 1));
+    }
+
+    if local_x < 0.0 {
+        candidates.push((overlap_x, -1.0, 0.0, 2));
+    }
+
+    if local_x >= 0.0 {
+        candidates.push((overlap_x, 1.0, 0.0, 3));
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let &(depth, local_nx, local_ny, face) = candidates.iter()
+        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap();
+
+    let theta = plat.rotation.to_radians();
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+    let world_nx = local_nx * cos_t - local_ny * sin_t;
+    let world_ny = local_nx * sin_t + local_ny * cos_t;
+
+    Some((world_nx * depth, world_ny * depth, face))
+}
+
+fn resolve_circle_collision(
+    obj: &object::GameObject,
+    plat: &object::GameObject,
+    radius: &f32,
+) -> Option<(f32, f32)> {
+    let r = if *radius <= 0.0 {
+        plat.size.0.min(plat.size.1) * 0.5
+    } else {
+        *radius
+    };
+
+    let plat_cx = plat.position.0 + plat.size.0 * 0.5;
+    let plat_cy = plat.position.1 + plat.size.1 * 0.5;
+    let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+    let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+
+    let dx = obj_cx - plat_cx;
+    let dy = obj_cy - plat_cy;
+    let dist = (dx * dx + dy * dy).sqrt();
+
+    let obj_half = (obj.size.0 + obj.size.1) * 0.25;
+    let combined = r + obj_half;
+
+    if dist >= combined {
+        return None;
+    }
+
+    if dist < 0.001 {
+        return Some((0.0, -(combined)));
+    }
+
+    let overlap = combined - dist;
+    let nx = dx / dist;
+    let ny = dy / dist;
+
+    Some((nx * overlap, ny * overlap))
 }

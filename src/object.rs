@@ -2,10 +2,10 @@ use prism::event::OnEvent;
 use prism::drawable::{Drawable, Component, SizedTree};
 use prism::Context;
 use prism::layout::{Area, SizeRequest};
-use prism::canvas::{Image, ShapeType, Text};
+use prism::canvas::{Image, ShapeType, Color};
 use crate::text::TextSpec;
 use crate::sprite::AnimatedSprite;
-use crate::types::Anchor;
+use crate::types::{CollisionMode, Anchor, GlowConfig, HighlightEffect};
 use std::cell::Cell;
 
 #[derive(Clone, Debug)]
@@ -31,6 +31,11 @@ pub struct GameObject {
     pub rotation_momentum:   f32,
     pub rotation_resistance: f32,
     pub surface_normal:      (f32, f32),
+    pub collision_mode:      CollisionMode,
+    pub highlight:    Option<HighlightEffect>,
+    glow_drawable: Option<Box<dyn Drawable>>,
+    tint_drawable: Option<Box<dyn Drawable>>,
+    pub grounded:            bool,
     text_spec:        Option<TextSpec>,
     last_text_scale:  Cell<f32>, 
 }
@@ -40,7 +45,20 @@ impl OnEvent for GameObject {}
 impl Component for GameObject {
     fn children(&self) -> Vec<&dyn Drawable> {
         if self.visible {
-            self.drawable.as_ref().map(|d| vec![d as &dyn Drawable]).unwrap_or_default()
+            let mut result = Vec::new();
+            // Main drawable
+            if let Some(d) = &self.drawable {
+                result.push(d.as_ref() as &dyn Drawable);
+            }
+            // Glow ring renders on top of main drawable
+            if let Some(glow) = &self.glow_drawable {
+                result.push(glow.as_ref() as &dyn Drawable);
+            }
+            // Tint overlay renders on top of everything
+            if let Some(tint) = &self.tint_drawable {
+                result.push(tint.as_ref() as &dyn Drawable);
+            }
+            result
         } else {
             vec![]
         }
@@ -48,7 +66,17 @@ impl Component for GameObject {
 
     fn children_mut(&mut self) -> Vec<&mut dyn Drawable> {
         if self.visible {
-            self.drawable.as_mut().map(|d| vec![d as &mut dyn Drawable]).unwrap_or_default()
+            let mut result = Vec::new();
+            if let Some(d) = &mut self.drawable {
+                result.push(d.as_mut() as &mut dyn Drawable);
+            }
+            if let Some(glow) = &mut self.glow_drawable {
+                result.push(glow.as_mut() as &mut dyn Drawable);
+            }
+            if let Some(tint) = &mut self.tint_drawable {
+                result.push(tint.as_mut() as &mut dyn Drawable);
+            }
+            result
         } else {
             vec![]
         }
@@ -79,6 +107,8 @@ impl GameObject {
             rotation_momentum: 0.0,
             rotation_resistance: 0.85,
             surface_normal: (0.0, -1.0),
+            collision_mode: CollisionMode::Surface,
+            highlight:     None,            
         }
     }
 
@@ -115,6 +145,11 @@ impl GameObject {
             rotation_momentum:   0.0,
             rotation_resistance: 0.85,
             surface_normal:      (0.0, -1.0),
+            collision_mode:     CollisionMode::Surface,
+            highlight:          None,
+            glow_drawable:      None,
+            tint_drawable:      None,
+            grounded:           false,
             text_spec:       None,
             last_text_scale: Cell::new(0.0),
         }
@@ -153,6 +188,11 @@ impl GameObject {
             rotation_momentum:   0.0,
             rotation_resistance: 0.85,
             surface_normal:      (0.0, -1.0),
+            collision_mode:      CollisionMode::Surface,
+            highlight:          None,
+            glow_drawable:      None,
+            tint_drawable:      None,
+            grounded:           false,
             text_spec:       None,
             last_text_scale: Cell::new(0.0),
         }
@@ -253,12 +293,147 @@ impl GameObject {
     }
 
     pub fn update_image_shape(&mut self) {
+        let scaled = self.scaled_size.get();
+        let rotation = self.rotation;
+
+        let rescale = |img: &mut Image, rot: f32| {
+            img.shape = match img.shape {
+                ShapeType::Rectangle(stroke, prev, _) => {
+                    let sx = if prev.0.abs() > f32::EPSILON { scaled.0 / prev.0 } else { 1.0 };
+                    let sy = if prev.1.abs() > f32::EPSILON { scaled.1 / prev.1 } else { 1.0 };
+                    let s = sx.min(sy);
+                    ShapeType::Rectangle(stroke * s, scaled, rot)
+                }
+                ShapeType::Ellipse(stroke, prev, _) => {
+                    let sx = if prev.0.abs() > f32::EPSILON { scaled.0 / prev.0 } else { 1.0 };
+                    let sy = if prev.1.abs() > f32::EPSILON { scaled.1 / prev.1 } else { 1.0 };
+                    let s = sx.min(sy);
+                    ShapeType::Ellipse(stroke * s, scaled, rot)
+                }
+                ShapeType::RoundedRectangle(stroke, prev, _, corner_radius) => {
+                    let sx = if prev.0.abs() > f32::EPSILON { scaled.0 / prev.0 } else { 1.0 };
+                    let sy = if prev.1.abs() > f32::EPSILON { scaled.1 / prev.1 } else { 1.0 };
+                    let s = sx.min(sy);
+                    ShapeType::RoundedRectangle(stroke * s, scaled, rot, corner_radius * s)
+                }
+            };
+        };
+
         if let Some(drawable) = self.drawable.as_mut() {
             if let Some(ref mut img) = drawable.downcast_mut::<Image>() {
-                let scaled = self.scaled_size.get();
-                img.shape = ShapeType::Rectangle(0.0, scaled, self.rotation);
+                rescale(img, rotation);
             }
         }
+        if let Some(glow) = self.glow_drawable.as_mut() {
+            if let Some(ref mut img) = glow.downcast_mut::<Image>() {
+                rescale(img, rotation);
+            }
+        }
+        if let Some(tint) = self.tint_drawable.as_mut() {
+            if let Some(ref mut img) = tint.downcast_mut::<Image>() {
+                rescale(img, rotation);
+            }
+        }
+    }
+
+    /// Detect the main drawable's shape and return a matching ShapeType
+    /// with the given stroke width and target size.
+    fn highlight_shape(&self, stroke: f32, size: (f32, f32)) -> ShapeType {
+        if let Some(drawable) = &self.drawable {
+            if let Some(img) = drawable.downcast_ref::<Image>() {
+                return match img.shape {
+                    ShapeType::Ellipse(_, _, _) =>
+                        ShapeType::Ellipse(stroke, size, 0.0),
+                    ShapeType::RoundedRectangle(_, _, _, cr) =>
+                        ShapeType::RoundedRectangle(stroke, size, 0.0, cr),
+                    _ =>
+                        ShapeType::Rectangle(stroke, size, 0.0),
+                };
+            }
+        }
+        ShapeType::Rectangle(stroke, size, 0.0)
+    }
+
+    fn rebuild_highlight_drawables(&mut self) {
+        let size = self.scaled_size.get();
+        match &self.highlight {
+            Some(effect) => {
+                self.glow_drawable = effect.glow.as_ref().map(|glow| {
+                    let pixel = image::RgbaImage::from_pixel(1, 1, image::Rgba([255,255,255,255])).into();
+                    let img = Image {
+                        shape: self.highlight_shape(glow.width, size),
+                        image: pixel,
+                        color: Some(glow.color),
+                    };
+                    Box::new(img) as Box<dyn Drawable>
+                });
+                self.tint_drawable = effect.tint.map(|color| {
+                    let pixel: std::sync::Arc<image::RgbaImage> = image::RgbaImage::from_pixel(1, 1, image::Rgba([255,255,255,255])).into();
+                    let img = Image {
+                        shape: self.highlight_shape(0.0, size),
+                        image: pixel,
+                        color: Some(color),
+                    };
+                    Box::new(img) as Box<dyn Drawable>
+                });
+            }
+            None => {
+                self.glow_drawable = None;
+                self.tint_drawable = None;
+            }
+        }
+
+        // Keep all image-based drawables synchronized to the current screen scale
+        // in the same frame they are rebuilt to avoid one-frame oversize flashes.
+        self.update_image_shape();
+    }
+
+    pub fn set_glow(&mut self, config: GlowConfig) {
+        let mut effect = self.highlight.take().unwrap_or_default();
+        effect.glow = Some(config);
+        self.highlight = Some(effect);
+        self.rebuild_highlight_drawables();
+    }
+
+    pub fn clear_glow(&mut self) {
+        if let Some(effect) = &mut self.highlight {
+            effect.glow = None;
+            if effect.tint.is_none() {
+                self.highlight = None;
+            }
+        }
+        self.rebuild_highlight_drawables();
+    }
+
+    pub fn set_tint(&mut self, color: Color) {
+        let mut effect = self.highlight.take().unwrap_or_default();
+        effect.tint = Some(color);
+        self.highlight = Some(effect);
+        self.rebuild_highlight_drawables();
+    }
+
+    pub fn clear_tint(&mut self) {
+        if let Some(effect) = &mut self.highlight {
+            effect.tint = None;
+            if effect.glow.is_none() {
+                self.highlight = None;
+            }
+        }
+        self.rebuild_highlight_drawables();
+    }
+
+    pub fn set_highlight(&mut self, effect: HighlightEffect) {
+        if effect.tint.is_none() && effect.glow.is_none() {
+            self.highlight = None;
+        } else {
+            self.highlight = Some(effect);
+        }
+        self.rebuild_highlight_drawables();
+    }
+
+    pub fn clear_highlight(&mut self) {
+        self.highlight = None;
+        self.rebuild_highlight_drawables();
     }
 
     pub(crate) fn update_text_scale(&mut self, scale: f32) {
@@ -375,6 +550,8 @@ pub struct GameObjectBuilder {
     pub rotation_momentum: f32,
     pub rotation_resistance: f32,
     surface_normal: (f32, f32),
+    collision_mode: CollisionMode,
+    highlight: Option<HighlightEffect>,
 }
 
 impl GameObjectBuilder {
@@ -425,9 +602,7 @@ impl GameObjectBuilder {
     }
 
     pub fn floor(mut self) -> Self {
-        self.is_platform    = true;
-        self.surface_normal = (0.0, -1.0);
-        self
+        self.platform()
     }
 
     pub fn ceiling(mut self) -> Self {
@@ -488,13 +663,54 @@ impl GameObjectBuilder {
         self
     }
 
+    pub fn solid(mut self) -> Self {
+        self.collision_mode = CollisionMode::solid();
+        self.is_platform = true;
+        self
+    }
+
+    pub fn solid_circle(mut self, radius: f32) -> Self {
+        self.collision_mode = CollisionMode::solid_circle(radius);
+        self.is_platform = true;
+        self
+    }
+
+    pub fn collision_mode(mut self, mode: CollisionMode) -> Self {
+        match &mode {
+            CollisionMode::NonPlatform => { self.is_platform = false; }
+            CollisionMode::Surface | CollisionMode::Solid(_) => { self.is_platform = true; }
+        }
+        self.collision_mode = mode;
+        self
+    }
+
+    pub fn highlight(mut self, effect: HighlightEffect) -> Self {
+        self.highlight = Some(effect);
+        self
+    }
+
+    pub fn glow(mut self, config: GlowConfig) -> Self {
+        let mut effect = self.highlight.take().unwrap_or_default();
+        effect.glow = Some(config);
+        self.highlight = Some(effect);  
+        self
+    }
+
+    pub fn tint(mut self, color: Color) -> Self {
+        let mut effect = self.highlight.take().unwrap_or_default();
+        effect.tint = Some(color);
+        self.highlight = Some(effect);  
+        self
+    }
+
     pub fn build(self, _ctx: &mut Context) -> GameObject {
         self.finish()
     }
 
     pub fn finish(self) -> GameObject {
         let size = self.size;
-        GameObject {
+        let highlight = self.highlight;
+        let mut obj = GameObject {
             layout:          prism::layout::Stack::default(),
             id:              self.id,
             tags:            self.tags,
@@ -516,8 +732,17 @@ impl GameObjectBuilder {
             rotation_momentum: 0.0,
             rotation_resistance: self.rotation_resistance,
             surface_normal:  self.surface_normal,
+            collision_mode:  self.collision_mode,
+            highlight:       None,
+            glow_drawable:   None,
+            tint_drawable:   None,
+            grounded:        false,
             text_spec:       None,
             last_text_scale: Cell::new(0.0),
+        };
+        if let Some(effect) = highlight {
+            obj.set_highlight(effect);
         }
+        obj
     }
 }
