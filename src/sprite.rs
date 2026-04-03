@@ -1,7 +1,135 @@
-use prism::canvas::{Image, ShapeType};
-use image::{RgbaImage, AnimationDecoder, imageops};
-use std::cell::RefCell;
+use prism::canvas::{Image, ShapeType, Color};
+use image::{RgbaImage, Rgba, AnimationDecoder, imageops};
 use std::io::Cursor;
+use prism::drawable::{Drawable, SizedTree, Rect};
+
+
+
+pub fn solid_circle(size: f32, color: Color) -> Image {
+    Image {
+        shape: ShapeType::RoundedRectangle(0.0, (size, size), 0.0, size * 0.5),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
+pub fn planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image {
+    Image {
+        shape: ShapeType::Rectangle(0.0, (size, size), 0.0),
+        image: generate_planet_rgba(radius, r, g, b, 1.0).into(),
+        color: None,
+    }
+}
+
+pub fn planet_grayscale(radius: u32, size: f32) -> Image {
+    Image {
+        shape: ShapeType::Rectangle(0.0, (size, size), 0.0),
+        image: generate_planet_rgba(radius, 255, 255, 255, 1.0).into(),
+        color: None,
+    }
+}
+
+pub fn with_tint(image: &Image, color: Color) -> Image {
+    Image {
+        shape: image.shape.clone(),
+        image: image.image.clone(),
+        color: Some(color),
+    }
+}
+
+pub fn planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size: f32) -> Image {
+    let rf = radius as f32;
+    let atm_px = rf * atmosphere.clamp(0.0, 1.0);
+    let outer_r = rf + atm_px;
+    let diameter = (outer_r * 2.0).ceil().max(1.0) as u32;
+    let mut img = RgbaImage::new(diameter, diameter);
+    let cx = outer_r;
+
+    for py in 0..diameter {
+        for px in 0..diameter {
+            let dx = px as f32 - cx + 0.5;
+            let dy = py as f32 - cx + 0.5;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            let (alpha, brightness) = if dist <=rf {
+                let rim = ((rf - dist) / rf).min(1.0);
+                (255u8, 0.7 + 0.3 * rim)
+            } else if atm_px > 0.0 && dist <= rf + atm_px {
+                let t = (dist - rf) / atm_px;
+                let alpha = ((1.0 - t) * 180.0) as u8;
+                (alpha, 0.6 + 0.15 * (1.0 - t))
+            } else {
+                continue;                
+            };
+
+            img.put_pixel(px, py, Rgba([
+                (r as f32 * brightness).min(255.0) as u8,
+                (g as f32 * brightness).min(255.0) as u8,
+                (b as f32 * brightness).min(255.0) as u8,
+                alpha,
+            ]));
+        }
+    }
+
+    Image {
+        shape: ShapeType::Rectangle(0.0, (size, size), 0.0),
+        image: img.into(),
+        color: None,
+    }
+}
+
+pub fn glow_ring(w: f32, h: f32, ring_width: f32, corner_radius: f32, color: Color) -> Image {
+    let total_w = w + 2.0 * ring_width;
+    let total_h = h + 2.0 * ring_width;
+    Image {
+        shape: ShapeType::RoundedRectangle(
+            ring_width,
+            (total_w, total_h),
+            0.0,
+            corner_radius + ring_width * 0.5,
+        ),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
+pub fn tint_overlay(w: f32, h: f32, color: Color) -> Image {
+    Image {
+        shape: ShapeType::Rectangle(0.0, (w, h), 0.0),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
+pub(crate) fn generate_planet_rgba(radius: u32, r: u8, g: u8, b: u8, brightness_scale: f32,) -> RgbaImage {
+    let diameter = radius * 2;
+    let mut img = RgbaImage::new(diameter, diameter);
+    let cx = radius as f32;
+    let rf = radius as f32;
+
+    for py in 0..diameter {
+        for px in 0..diameter {
+            let dx = px as f32 - cx + 0.5;
+            let dy = py as f32 - cx + 0.5;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist > rf { continue; }
+
+            let rim = ((rf - dist) / rf).min(1.0);
+            let brightness = (0.7 + 0.3 * rim) * brightness_scale;
+
+            img.put_pixel(px, py, Rgba([
+                (r as f32 * brightness).min(255.0) as u8,
+                (g as f32 * brightness).min(255.0) as u8,
+                (b as f32 * brightness).min(255.0) as u8,
+                255,                
+            ]));
+        }
+    }
+
+    img
+
+}
 
 thread_local! {
     pub(crate) static LAST_ASSET_PATH: RefCell<Option<String>> = RefCell::new(None);
@@ -163,6 +291,34 @@ impl AnimatedSprite {
         if frames.is_empty() {
             return Err("GIF has no frames".to_string());
         }
+
+        // Fit each frame within the requested display size, preserving the
+        // GIF's native aspect ratio (uniform scale), then center on a
+        // transparent canvas sized to the display dimensions. This ensures:
+        //   1) pixel size == display size → the renderer never UV-crops
+        //   2) proportions are preserved across animations of different
+        //      native dimensions (idle 38×59, running 43×60, walking 32×60
+        //      all produce the same character scale inside e.g. 200×200)
+        //   3) transparent padding fills unused space
+        let tw = size.0.round().max(1.0) as u32;
+        let th = size.1.round().max(1.0) as u32;
+        frames = frames.into_iter().map(|f| {
+            let fw = f.width();
+            let fh = f.height();
+            if fw == tw && fh == th { return f; }
+
+            let scale = (tw as f32 / fw as f32).min(th as f32 / fh as f32);
+            let rw = (fw as f32 * scale).round().max(1.0) as u32;
+            let rh = (fh as f32 * scale).round().max(1.0) as u32;
+            let resized = imageops::resize(&f, rw, rh, imageops::FilterType::Nearest);
+
+            let mut canvas = RgbaImage::from_pixel(tw, th, image::Rgba([0, 0, 0, 0]));
+            let ox = tw.saturating_sub(rw) / 2;
+            let oy = th.saturating_sub(rh) / 2;
+            imageops::overlay(&mut canvas, &resized, ox as i64, oy as i64);
+            canvas
+        }).collect();
+
         Ok(Self::from_frames(frames, size, fps))
     }
 
@@ -265,3 +421,4 @@ impl std::fmt::Debug for AnimatedSprite {
             .finish()
     }
 }
+

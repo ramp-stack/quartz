@@ -128,6 +128,42 @@ Canvas::load_scene(name: &str)
 Canvas::active_scene() -> Option<&str>
 Canvas::is_scene(name: &str) -> bool
 
+Canvas::pause()                                                   [NEW 2026-03-31]
+Canvas::resume()                                                  [NEW 2026-03-31]
+Canvas::is_paused() -> bool                                       [NEW 2026-03-31]
+
+--------------------------------------------------------------------------------
+  CANVAS — Game Variables  (canvas.rs)                            [NEW 2026-03-31]
+--------------------------------------------------------------------------------
+
+Canvas::set_var(name: impl Into<String>, value: impl Into<Value>)
+Canvas::get_var(name: &str) -> Option<Value>
+Canvas::has_var(name: &str) -> bool
+Canvas::remove_var(name: &str)
+Canvas::resolve(expr: &Expr) -> Option<Value>
+Canvas::modify_var(name: &str, f: impl FnOnce(Value) -> Value)
+
+Typed getters (panic on missing key or wrong type):               [UPDATED 2026-03-31]
+Canvas::get_u8(name: &str) -> u8
+Canvas::get_u32(name: &str) -> u32
+Canvas::get_i32(name: &str) -> i32
+Canvas::get_f32(name: &str) -> f32
+Canvas::get_bool(name: &str) -> bool
+Canvas::get_usize(name: &str) -> usize
+Canvas::get_str(name: &str) -> &str
+  These panic with a descriptive message if the key is missing or holds a
+  different Value variant. For optional access, use get_var() or has_var()
+  before calling a typed getter.
+
+Typed modifiers (panic on missing key or mismatched type): [UPDATED 2026-03-31]
+Canvas::modify_u8(name: &str, f: impl FnOnce(u8) -> u8)
+Canvas::modify_u32(name: &str, f: impl FnOnce(u32) -> u32)
+Canvas::modify_i32(name: &str, f: impl FnOnce(i32) -> i32)
+Canvas::modify_f32(name: &str, f: impl FnOnce(f32) -> f32)
+Canvas::modify_bool(name: &str, f: impl FnOnce(bool) -> bool)
+Canvas::modify_usize(name: &str, f: impl FnOnce(usize) -> usize)
+Canvas::modify_str(name: &str, f: impl FnOnce(String) -> String)
+
 --------------------------------------------------------------------------------
   CANVAS — HOT RELOAD  (canvas.rs / file_watcher.rs)
 --------------------------------------------------------------------------------
@@ -256,19 +292,94 @@ CanvasLayout implements Layout (prism):
 Action  (enum, Clone, Debug)
   All variants accepted by Canvas::run().
 
-  ApplyMomentum  { target: Target, value: (f32, f32) }
-  SetMomentum    { target: Target, value: (f32, f32) }
-  SetResistance  { target: Target, value: (f32, f32) }
-  Spawn          { object: Box<GameObject>, location: Location }
-  Remove         { target: Target }
-  TransferMomentum { from: Target, to: Target, scale: f32 }
-  SetAnimation   { target: Target, animation_bytes: &'static [u8], fps: f32 }
-  Teleport       { target: Target, location: Location }
-  Show           { target: Target }
-  Hide           { target: Target }
-  Toggle         { target: Target }
-  Conditional    { condition: Condition, if_true: Box<Action>, if_false: Option<Box<Action>> }
-  Custom         { name: String }
+  ApplyMomentum   { target: Target, value: (f32, f32) }
+  SetMomentum     { target: Target, value: (f32, f32) }
+  SetResistance   { target: Target, value: (f32, f32) }
+  Spawn           { object: Box<GameObject>, location: Location }
+  Remove          { target: Target }
+  TransferMomentum{ from: Target, to: Target, scale: f32 }
+  SetAnimation    { target: Target, animation_bytes: &'static [u8], fps: f32 }
+  Teleport        { target: Target, location: Location }
+  Show            { target: Target }
+  Hide            { target: Target }
+  Toggle          { target: Target }
+  Conditional     { condition: Condition, if_true: Box<Action>, if_false: Option<Box<Action>> }
+  Custom          { name: String }
+  SetVar          { name: String, value: Expr }                   [NEW 2026-03-31]
+  ModVar          { name: String, op: MathOp, operand: Expr }    [NEW 2026-03-31]
+  Multi           (Vec<Action>)                                   [NEW 2026-03-31]
+  PlaySound       { path: String, options: SoundOptions }         [NEW 2026-03-31]
+  SetGravity      { target: Target, value: f32 }                  [NEW 2026-03-31]
+  SetSize         { target: Target, value: (f32, f32) }           [NEW 2026-03-31]
+  AddTag          { target: Target, tag: String }                 [NEW 2026-03-31]
+  RemoveTag       { target: Target, tag: String }                 [NEW 2026-03-31]
+  SetText         { target: Target, text: Text }                  [NEW 2026-03-31]
+  Expr            (String)                                        [NEW 2026-03-31]
+  SetRotation     { target: Target, value: f32 }                  [NEW 2026-03-31]
+  SetSlope        { target: Target, left_offset: f32, right_offset: f32, auto_rotate: bool }
+  AddRotation     { target: Target, value: f32 }                  [NEW 2026-03-31]
+  ApplyRotation   { target: Target, value: f32 }                  [NEW 2026-03-31]
+  SetSurfaceNormal{ target: Target, nx: f32, ny: f32 }            [NEW 2026-03-31]
+  SetCollisionMode{ target: Target, mode: CollisionMode }         [NEW 2026-03-31]
+  SetGlow         { target: Target, color: Color, width: f32 }    [NEW 2026-03-31]
+  ClearGlow       { target: Target }                              [NEW 2026-03-31]
+  SetTint         { target: Target, color: Color }                [NEW 2026-03-31]
+  ClearTint       { target: Target }                              [NEW 2026-03-31]
+
+Action helper constructors:                                       [NEW 2026-03-31]
+  Action::expr(s)
+  Action::expr_checked(s) -> Result<Action, String>
+  Action::when(cond, if_true, if_false)
+  Action::when_if(cond, if_true)
+  Action::when_else(cond, if_true, if_false)
+  Action::multi(actions)
+  Action::set_var(name, value)
+  Action::mod_var(name, op, operand)
+  Action::custom(name)
+  Action::show(target) / hide(target) / toggle(target) / remove(target)
+  Action::spawn(object, location) / teleport(target, location)
+  Action::apply_momentum(target, x, y) / set_momentum(target, x, y)
+  Action::set_resistance(target, x, y)
+  Action::set_gravity(target, value)
+  Action::transfer_momentum(from, to, scale)
+  Action::set_size(target, width, height)
+  Action::add_tag(target, tag) / remove_tag(target, tag)
+  Action::set_text(target, text)                  — Text payload
+  Action::play_sound(path) / play_sound_with_options(path, options)
+  Action::set_animation(target, animation_bytes, fps)
+  Action::set_rotation(target, value) / add_rotation(target, value)
+  Action::apply_rotation(target, value)
+  Action::set_slope(target, left, right, auto_rotate)
+  Action::set_surface_normal(target, nx, ny)
+  Action::set_collision_mode(target, mode)
+  Action::set_glow(target, color, width) / clear_glow(target)
+  Action::set_tint(target, color) / clear_tint(target)
+
+--------------------------------------------------------------------------------
+  MODULE: Collision / Highlight Types  (types.rs)                 [NEW 2026-03-31]
+--------------------------------------------------------------------------------
+
+CollisionShape  (enum)
+  Rectangle
+  Circle { radius: f32 }
+
+CollisionShape::circle(radius: f32) -> CollisionShape
+CollisionShape::circle_auto() -> CollisionShape
+
+CollisionMode  (enum)
+  NonPlatform
+  Surface
+  Solid(CollisionShape)
+
+CollisionMode::non_platform() -> CollisionMode
+CollisionMode::solid() -> CollisionMode
+CollisionMode::solid_circle(radius: f32) -> CollisionMode
+
+GlowConfig  (struct)
+  Fields: color: Color, width: f32
+
+HighlightEffect  (struct)
+  Fields: tint: Option<Color>, glow: Option<GlowConfig>
 
 --------------------------------------------------------------------------------
   MODULE: Target / Location / Anchor  (types.rs)
@@ -292,6 +403,11 @@ Location  (enum, Debug, Clone)
   Location::at(x: f32, y: f32) -> Location
     Shorthand for Location::Position((x, y)).
 
+  Location::at_target(target: Target) -> Location                 [NEW 2026-03-31]
+  Location::between(t1: Target, t2: Target) -> Location           [NEW 2026-03-31]
+  Location::relative_to(target: Target, offset: (f32, f32)) -> Location
+  Location::on_target(target: Target, anchor: Anchor, offset: (f32, f32)) -> Location
+
   Location::resolve_position(store: &ObjectStore) -> (f32, f32)  (pub(crate))
 
 --------------------------------------------------------------------------------
@@ -307,6 +423,19 @@ Condition  (enum, Clone, Debug)
     Or(Box<Condition>, Box<Condition>)
     Not(Box<Condition>)
     IsVisible(Target) / IsHidden(Target)
+    Compare(Expr, CompOp, Expr)                                   [NEW 2026-03-31]
+    VarExists(String)                                             [NEW 2026-03-31]
+    Grounded(Target)                                              [NEW 2026-03-31]
+    Expr(String)                                                  [NEW 2026-03-31]
+    HasTag(Target, String)                                        [NEW 2026-03-31]
+
+Condition::expr(s) -> Condition                                   [NEW 2026-03-31]
+Condition::expr_checked(s) -> Result<Condition, String>           [NEW 2026-03-31]
+
+ConditionOps (trait)                                              [NEW 2026-03-31]
+  condition.and(other)
+  condition.or(other)
+  condition.not()
 
 --------------------------------------------------------------------------------
   MODULE: GameEvent  (types.rs)
@@ -368,6 +497,18 @@ ScrollAxis  (enum, Clone, Copy, Debug, PartialEq, Eq)
     .momentum(x: f32, y: f32)
     .resistance(x: f32, y: f32)
     .platform()
+    .floor()
+    .ceiling() / .wall_left() / .wall_right()                    [NEW 2026-03-31]
+    .surface(nx, ny)                                              [NEW 2026-03-31]
+    .rotation(degrees)                                            [NEW 2026-03-31]
+    .slope(left_offset, right_offset)                             [NEW 2026-03-31]
+    .slope_auto_rotation(left_offset, right_offset)               [NEW 2026-03-31]
+    .one_way()                                                    [NEW 2026-03-31]
+    .surface_velocity(vx)                                         [NEW 2026-03-31]
+    .rotation_resistance(resistance)                              [NEW 2026-03-31]
+    .solid() / .solid_circle(radius)                              [NEW 2026-03-31]
+    .collision_mode(mode: CollisionMode)                          [NEW 2026-03-31]
+    .highlight(effect) / .glow(config) / .tint(color)             [NEW 2026-03-31]
     .layer(id: u32)
 
   GameObjectBuilder::finish() -> GameObject
@@ -389,13 +530,34 @@ GameObject  (struct, Clone, Debug)
     tags: Vec<String>
     layer: Option<u32>
     animated_sprite: Option<AnimatedSprite>
+    rotation: f32                                                 [NEW 2026-03-31]
+    slope: Option<(f32, f32)>                                     [NEW 2026-03-31]
+    one_way: bool                                                 [NEW 2026-03-31]
+    surface_velocity: Option<f32>                                 [NEW 2026-03-31]
+    rotation_momentum: f32                                        [NEW 2026-03-31]
+    rotation_resistance: f32                                      [NEW 2026-03-31]
+    surface_normal: (f32, f32)                                    [NEW 2026-03-31]
+    collision_mode: CollisionMode                                 [NEW 2026-03-31]
+    highlight: Option<HighlightEffect>                            [NEW 2026-03-31]
+    grounded: bool                                                [NEW 2026-03-31]
 
   Methods:
+    .set_gravity(gravity: f32)
     .set_animation(sprite: AnimatedSprite)
     .set_image(image: Image)
     .set_text(spec: TextSpec)
     .set_drawable(drawable: Box<dyn Drawable>)
-    .set_gravity(gravity: f32)
+    .set_glow(config: GlowConfig)                                 [NEW 2026-03-31]
+    .clear_glow()                                                 [NEW 2026-03-31]
+    .set_tint(color: Color)                                       [NEW 2026-03-31]
+    .clear_tint()                                                 [NEW 2026-03-31]
+    .set_highlight(effect: HighlightEffect)                       [NEW 2026-03-31]
+    .clear_highlight()                                            [NEW 2026-03-31]
+    .sync_rotation_normal()                                       [NEW 2026-03-31]
+    .slope_surface_y(world_x: f32) -> f32                         [NEW 2026-03-31]
+    .rotation_from_slope() -> f32                                 [NEW 2026-03-31]
+    .surface_normal_at(world_x: f32) -> (f32, f32)                [NEW 2026-03-31]
+    .slope_aabb() -> (f32, f32, f32, f32)                         [NEW 2026-03-31]
     .contains_point(pt: (f32, f32)) -> bool
     .check_boundary_collision(canvas_size: (f32, f32)) -> bool
     .get_anchor_position(anchor: Anchor) -> (f32, f32)
@@ -463,6 +625,62 @@ rotate_cw(img: Image) -> Image
 rotate_ccw(img: Image) -> Image
 rotate_180(img: Image) -> Image
 
+Specialized helpers:                                              [NEW 2026-03-31]
+solid_circle(size: f32, color: Color) -> Image
+planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image
+planet_grayscale(radius: u32, size: f32) -> Image
+with_tint(image: &Image, color: Color) -> Image
+planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size: f32) -> Image
+glow_ring(w: f32, h: f32, ring_width: f32, corner_radius: f32, color: Color) -> Image
+tint_overlay(w: f32, h: f32, color: Color) -> Image
+
+--------------------------------------------------------------------------------
+  MODULE: Value / Expr / MathOp / CompOp  (value.rs)              [NEW 2026-03-31]
+--------------------------------------------------------------------------------
+
+Value  (enum)
+  Variants:
+    I8, U8, I16, U16, I32, U32, I64, U64, F32, F64, Usize, Bool, Str
+
+Value::to_display_string() -> String
+
+MathOp  (enum)
+  Variants: Add, Sub, Mul, Div
+
+CompOp  (enum)
+  Variants: Eq, Ne, Gt, Lt, Gte, Lte
+
+Expr  (enum)
+  Variants:
+    Lit(Value)
+    Var(String)
+    Add(Box<Expr>, Box<Expr>)
+    Sub(Box<Expr>, Box<Expr>)
+    Mul(Box<Expr>, Box<Expr>)
+    Div(Box<Expr>, Box<Expr>)
+    Format { template: String, args: Vec<Expr> }
+
+Expr constructors:
+  Expr::var(name)
+  Expr::i8 / u8 / i16 / u16 / i32 / u32 / i64 / u64 / f32 / f64 / usize / str / bool
+  Expr::add(a, b) / sub(a, b) / mul(a, b) / div(a, b)
+
+Expr comparator helpers (produce Condition::Compare):
+  expr.eq(rhs) / expr.ne(rhs)
+  expr.gt(rhs) / expr.lt(rhs)
+  expr.gte(rhs) / expr.lte(rhs)
+
+resolve_expr(expr: &Expr, vars: &HashMap<String, Value>) -> Option<Value>
+apply_op(left: &Value, right: &Value, op: &MathOp) -> Option<Value>
+compare_operands(left: &Value, right: &Value, op: &CompOp) -> Option<bool>
+
+--------------------------------------------------------------------------------
+  MODULE: Expression Parser  (expr.rs)                            [NEW 2026-03-31]
+--------------------------------------------------------------------------------
+
+parse_condition(source: &str) -> Result<Condition, String>
+parse_action(source: &str) -> Result<Vec<Action>, String>
+
 --------------------------------------------------------------------------------
   MODULE: Lerp  (lerp.rs)
 --------------------------------------------------------------------------------
@@ -518,6 +736,7 @@ Scene::on_exit<F>(f: F) -> Scene
 
 SceneManager::new() -> SceneManager
 SceneManager::add_scene(scene: Scene)
+SceneManager::load_scene(name: &str)                              [NEW 2026-03-31]
 SceneManager::active_scene() -> Option<&str>
 SceneManager::has_scene(name: &str) -> bool
 
@@ -669,6 +888,9 @@ make_text_aligned(text, font_size, font, color, align) -> TextSpec
 
 make_text_multi(spans: Vec<(String, f32, Font, Color)>, align: Align) -> TextSpec
   Multi-span text with a shared alignment.
+
+[UPDATED 2026-03-31] Action::set_text(...) uses Text payload.
+TextSpec remains available through GameObject::set_text(spec) and helper builders.
 
 --------------------------------------------------------------------------------
   MODULE: Value / Expr  (value.rs)

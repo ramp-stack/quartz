@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::Condition;
 
 #[derive(Debug, Clone)]
 pub enum MathOp {
@@ -80,11 +81,36 @@ impl Expr {
     pub fn f64(n: f64)     -> Self { Expr::Lit(Value::F64(n)) }
     pub fn usize(n: usize) -> Self { Expr::Lit(Value::Usize(n)) }
     pub fn str(s: impl Into<String>) -> Self { Expr::Lit(Value::Str(s.into())) }
+    pub fn bool(b: bool)   -> Self { Expr::Lit(Value::Bool(b)) }
 
     pub fn add(a: Expr, b: Expr) -> Self { Expr::Add(Box::new(a), Box::new(b)) }
     pub fn sub(a: Expr, b: Expr) -> Self { Expr::Sub(Box::new(a), Box::new(b)) }
     pub fn mul(a: Expr, b: Expr) -> Self { Expr::Mul(Box::new(a), Box::new(b)) }
     pub fn div(a: Expr, b: Expr) -> Self { Expr::Div(Box::new(a), Box::new(b)) }
+
+    pub fn eq(self, rhs: impl Into<Expr>) -> Condition {
+        Condition::Compare(self, CompOp::Eq, rhs.into())
+    }
+
+    pub fn ne(self, rhs: impl Into<Expr>) -> Condition {
+        Condition::Compare(self, CompOp::Ne, rhs.into())
+    }
+
+    pub fn gt(self, rhs: impl Into<Expr>) -> Condition {
+        Condition::Compare(self, CompOp::Gt, rhs.into())
+    }
+
+    pub fn lt(self, rhs: impl Into<Expr>) -> Condition {
+        Condition::Compare(self, CompOp::Lt, rhs.into())
+    }
+
+    pub fn gte(self, rhs: impl Into<Expr>) -> Condition {
+        Condition::Compare(self, CompOp::Gte, rhs.into())
+    }
+
+    pub fn lte(self, rhs: impl Into<Expr>) -> Condition {
+        Condition::Compare(self, CompOp::Lte, rhs.into())
+    }
 }
 
 impl From<Value> for Expr {
