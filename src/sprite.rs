@@ -131,7 +131,12 @@ pub(crate) fn generate_planet_rgba(radius: u32, r: u8, g: u8, b: u8, brightness_
 
 }
 
+thread_local! {
+    pub(crate) static LAST_ASSET_PATH: RefCell<Option<String>> = RefCell::new(None);
+}
+
 pub fn load_image(path: &str) -> Image {
+    LAST_ASSET_PATH.with(|p| *p.borrow_mut() = Some(path.to_string()));
     let rgba = image::open(path)
         .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
         .into_rgba8();
@@ -140,10 +145,30 @@ pub fn load_image(path: &str) -> Image {
 }
 
 pub fn load_image_sized(path: &str, w: f32, h: f32) -> Image {
+    LAST_ASSET_PATH.with(|p| *p.borrow_mut() = Some(path.to_string()));
     let rgba = image::open(path)
         .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
         .into_rgba8();
     make_image(rgba, w, h)
+}
+
+/// Load an animated GIF from a file path. Registers the path automatically
+/// for hot-reloading — no extra setup required.
+pub fn load_animation(path: &str, size: (f32, f32), fps: f32) -> AnimatedSprite {
+    LAST_ASSET_PATH.with(|p| *p.borrow_mut() = Some(path.to_string()));
+    let bytes = std::fs::read(path)
+        .unwrap_or_else(|_| panic!("quartz: cannot read animation '{}'", path));
+    AnimatedSprite::decode_vec(bytes, size, fps)
+        .unwrap_or_else(|e| panic!("quartz: failed to decode animation '{}': {}", path, e))
+}
+
+/// Re-read an image from disk at a fixed size without touching the thread-local.
+/// Used internally by hot-reload; not part of the public API.
+pub(crate) fn reload_image_raw(path: &str, size: (f32, f32)) -> Image {
+    let rgba = image::open(path)
+        .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
+        .into_rgba8();
+    make_image(rgba, size.0, size.1)
 }
 
 pub fn flip_horizontal(img: Image) -> Image {
@@ -185,7 +210,7 @@ fn extract(img: Image) -> (RgbaImage, f32, f32) {
     (pixels, w, h)
 }
 
-fn make_image(pixels: RgbaImage, w: f32, h: f32) -> Image {
+pub(crate) fn make_image(pixels: RgbaImage, w: f32, h: f32) -> Image {
     Image {
         shape: ShapeType::Rectangle(0.0, (w, h), 0.0),
         image: pixels.into(),
@@ -215,7 +240,7 @@ impl RotationOptions {
     pub fn degrees(degrees: f32) -> Self {
         Self { degrees, direction: RotationDirection::Clockwise }
     }
-    fn to_radians(self) -> f32 {
+    pub(crate) fn to_radians(self) -> f32 {
         let r = self.degrees.to_radians();
         match self.direction {
             RotationDirection::Clockwise        =>  r,
@@ -243,18 +268,26 @@ pub struct AnimatedSprite {
 }
 
 impl AnimatedSprite {
+    /// Create from static bytes (e.g. `include_bytes!`). Does not register for hot-reload.
     pub fn new(gif_bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String> {
-        let cursor  = Cursor::new(gif_bytes);
+        Self::decode_slice(gif_bytes, size, fps)
+    }
+
+    /// Create from an owned Vec<u8>. Used by `load_animation` and hot-reload internally.
+    pub(crate) fn decode_vec(bytes: Vec<u8>, size: (f32, f32), fps: f32) -> Result<Self, String> {
+        Self::decode_slice(&bytes, size, fps)
+    }
+
+    fn decode_slice(bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String> {
+        let cursor  = Cursor::new(bytes);
         let decoder = image::codecs::gif::GifDecoder::new(cursor)
             .map_err(|e| format!("Failed to decode GIF: {}", e))?;
-
         let mut frames = Vec::new();
         for frame_result in decoder.into_frames() {
             let frame = frame_result
                 .map_err(|e| format!("Failed to decode frame: {}", e))?;
             frames.push(frame.into_buffer());
         }
-
         if frames.is_empty() {
             return Err("GIF has no frames".to_string());
         }
@@ -303,6 +336,8 @@ impl AnimatedSprite {
         }
     }
 
+    pub fn fps(&self) -> f32 { 1.0 / self.frame_duration }
+
     pub fn update(&mut self, delta_time: f32) {
         self.time_since_last_frame += delta_time;
         while self.time_since_last_frame >= self.frame_duration {
@@ -338,12 +373,12 @@ impl AnimatedSprite {
         }
     }
 
-    pub fn mirror(&mut self)                      { self.mirrored_h = !self.mirrored_h; }
-    pub fn set_mirrored(&mut self, v: bool)       { self.mirrored_h = v; }
-    pub fn is_mirrored(&self) -> bool             { self.mirrored_h }
-    pub fn mirror_vertical(&mut self)             { self.mirrored_v = !self.mirrored_v; }
+    pub fn mirror(&mut self)                         { self.mirrored_h = !self.mirrored_h; }
+    pub fn set_mirrored(&mut self, v: bool)          { self.mirrored_h = v; }
+    pub fn is_mirrored(&self) -> bool                { self.mirrored_h }
+    pub fn mirror_vertical(&mut self)                { self.mirrored_v = !self.mirrored_v; }
     pub fn set_mirrored_vertical(&mut self, v: bool) { self.mirrored_v = v; }
-    pub fn is_mirrored_vertical(&self) -> bool    { self.mirrored_v }
+    pub fn is_mirrored_vertical(&self) -> bool       { self.mirrored_v }
 
     pub fn set_rotation(&mut self, options: RotationOptions) { self.rotation = options; }
 

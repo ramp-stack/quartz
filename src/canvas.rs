@@ -1,4 +1,5 @@
 use super::*;
+use crate::file_watcher::{FileWatcher, FileWatchCallback};
 use crate::sound::spawn_sound;
 use crate::value::{Value, Expr, resolve_expr, apply_op, compare_operands};
 use crate::expr::{parse_action, parse_condition};
@@ -17,6 +18,15 @@ impl Canvas {
                 scale:            Cell::new(1.0),
                 safe_area_offset: Cell::new((0.0, 0.0)),
             },
+            store:            ObjectStore::new(),
+            input:            InputState::new(),
+            mouse:            MouseState::new(),
+            callbacks:        CallbackStore::new(),
+            scene_manager:    SceneManager::new(),
+            active_camera:    None,
+            entropy:          Entropy::new(),
+            hot_reload_timer: 0.0,
+            file_watchers:    Vec::new(),
             store:         ObjectStore::new(),
             input:         InputState::new(),
             mouse:         MouseState::new(),
@@ -27,6 +37,52 @@ impl Canvas {
             game_vars:     HashMap::new(),
             paused:        false,
         }
+    }
+
+    /// Watch any file on disk. The callback receives the full file bytes every
+    /// time the file's modification time changes. Use this for config files,
+    /// theme files, shaders — anything that isn't an image or animation.
+    pub fn watch_file<F>(&mut self, path: impl Into<String>, handler: F)
+    where
+        F: FnMut(&mut Canvas, &[u8]) + Clone + 'static,
+    {
+        let path  = path.into();
+        let mtime = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        self.file_watchers.push(FileWatcher {
+            path,
+            mtime,
+            handler: Box::new(handler),
+        });
+    }
+
+    /// Watch a Rust source file and automatically parse + update a `Shared<T>`
+    /// whenever the file changes on disk. `T` must implement `quartz::FromSource`.
+    /// Check `shared.changed()` inside `on_update` to react to the new value.
+    ///
+    /// ```rust
+    /// cv.watch_source(SOURCE_FILE, s.clone());
+    ///
+    /// // inside on_update:
+    /// if s_tick.changed() {
+    ///     rebuild_chrome(cv, &s_tick.get(), vw, vh);
+    ///     state.get_mut().invalidate_all();
+    /// }
+    /// ```
+    pub fn watch_source<T>(
+        &mut self,
+        path:   impl Into<String>,
+        target: crate::file_watcher::Shared<T>,
+    )
+    where
+        T: crate::file_watcher::FromSource + Clone + 'static,
+    {
+        self.watch_file(path, move |_cv, bytes| {
+            let Ok(src) = std::str::from_utf8(bytes) else { return };
+            let new_val = T::from_source(&crate::file_watcher::SourceSettings::parse(src));
+            target.set(new_val);
+        });
     }
 
     pub fn key(&self, name: &str) -> bool {
@@ -746,6 +802,40 @@ impl Canvas {
         }
     }
 
+    pub(crate) fn process_hot_reloads(&mut self, delta_time: f32) {
+        self.hot_reload_timer += delta_time;
+        if self.hot_reload_timer < 0.5 { return; }
+        self.hot_reload_timer = 0.0;
+
+        for obj in self.store.objects.iter_mut() {
+            let image_path = obj.image_path.clone();
+            let anim_path  = obj.animation_path.clone();
+            if let Some(path) = image_path { obj.hot_reload_image(&path); }
+            if let Some(path) = anim_path  { obj.hot_reload_animation(&path); }
+        }
+
+        let changed: Vec<(usize, Vec<u8>)> = self.file_watchers
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, w)| {
+                let meta  = std::fs::metadata(&w.path).ok()?;
+                let mtime = meta.modified().ok()?;
+                if Some(mtime) == w.mtime { return None; }
+                w.mtime = Some(mtime);
+                match std::fs::read(&w.path) {
+                    Ok(bytes) => Some((i, bytes)),
+                    Err(e)    => { eprintln!("[hot-reload] read '{}': {e}", w.path); None }
+                }
+            })
+            .collect();
+
+        for (i, bytes) in changed {
+            let mut watcher = self.file_watchers[i].clone();
+            watcher.handler.call(self, &bytes);
+            self.file_watchers[i] = watcher;
+            println!("[hot-reload] file reloaded: {}", self.file_watchers[i].path);
+        }
+    }
     // ── game_vars accessors ──────────────────────────────────────────
 
     pub fn set_var(&mut self, name: impl Into<String>, value: impl Into<Value>) {

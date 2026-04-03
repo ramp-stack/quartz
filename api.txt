@@ -97,8 +97,10 @@ Canvas::objects_in_radius(game_object: &GameObject, radius_px: f32) -> Vec<&Game
 
 --------------------------------------------------------------------------------
 
+Canvas::canvas_size() -> (f32, f32)
 Canvas::get_virtual_size() -> (f32, f32)
-  Returns the virtual canvas size (width, height) in virtual pixels.
+  Both return the virtual canvas size (width, height) in virtual pixels.
+  canvas_size() is the preferred form; get_virtual_size() is an alias.
 
 --------------------------------------------------------------------------------
 
@@ -161,6 +163,35 @@ Canvas::modify_f32(name: &str, f: impl FnOnce(f32) -> f32)
 Canvas::modify_bool(name: &str, f: impl FnOnce(bool) -> bool)
 Canvas::modify_usize(name: &str, f: impl FnOnce(usize) -> usize)
 Canvas::modify_str(name: &str, f: impl FnOnce(String) -> String)
+
+--------------------------------------------------------------------------------
+  CANVAS — HOT RELOAD  (canvas.rs / file_watcher.rs)
+--------------------------------------------------------------------------------
+
+Canvas::watch_file<F>(path: impl Into<String>, handler: F)
+  Watch any file on disk. The callback fires every time the file's modification
+  time changes, receiving the full file contents as a byte slice.
+  Parameters:
+    path    - Path to the file to watch.
+    handler - FnMut(&mut Canvas, &[u8]) + Clone + 'static
+  Notes:
+    Suitable for config files, theme files, shaders — anything that is not an
+    image or animation (those are hot-reloaded automatically via load_image /
+    load_animation). The poll interval is 0.5 s.
+
+Canvas::watch_source<T>(path: impl Into<String>, target: Shared<T>)
+  Watch a Rust source file and automatically parse + update a Shared<T>
+  whenever the file changes on disk. T must implement FromSource.
+  Check shared.changed() inside on_update to react to the new value.
+  Parameters:
+    path   - Path to the .rs source file.
+    target - A Shared<T> that will be updated with the parsed value.
+  Example:
+    cv.watch_source("src/app.rs", settings.clone());
+    // inside on_update:
+    if settings.changed() {
+        rebuild_ui(cv, &settings.get());
+    }
 
 --------------------------------------------------------------------------------
   CANVAS — DRAWING HELPERS  (apis.rs)
@@ -754,6 +785,85 @@ Entropy::pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T>
 Entropy::position_in(&mut self, x: f32, y: f32, w: f32, h: f32) -> (f32, f32)
 
 --------------------------------------------------------------------------------
+  MODULE: Shared<T>  (file_watcher.rs)
+--------------------------------------------------------------------------------
+
+Shared<T>  (struct, Clone, Debug where T: Debug)
+  A cheaply-cloneable reference-counted shared value built on Rc<RefCell<T>>.
+  Also tracks whether the inner value was updated since the last changed() call,
+  so on_update callbacks can react to hot-reloaded settings without extra wiring.
+  All clones share the same underlying value and changed flag.
+
+Shared::new(val: T) -> Shared<T>
+  Wrap val in a new Shared.
+
+.get(&self) -> Ref<'_, T>
+  Immutable borrow of the inner value.
+
+.get_mut(&self) -> RefMut<'_, T>
+  Mutable borrow of the inner value.
+
+.update<F: FnOnce(&mut T)>(&self, f: F)
+  Apply a mutation closure without holding a borrow guard across statements.
+
+.set(&self, val: T)
+  Replace the inner value and set the changed flag to true.
+
+.changed(&self) -> bool
+  Returns true if the value was updated since the last call to changed(),
+  then resets the flag to false. Intended for use inside on_update.
+  Example:
+    if settings.changed() {
+        rebuild_chrome(cv, &settings.get(), vw, vh);
+    }
+
+--------------------------------------------------------------------------------
+  MODULE: SourceSettings  (file_watcher.rs)
+--------------------------------------------------------------------------------
+
+SourceSettings  (struct, Debug, Clone, Default)
+  Parses a Rust source file into a flat key→value map by scanning every line
+  for the pattern `field_name: <value>,` (trimmed). Supports string literals,
+  f32, and usize. Comments (// and /*) are skipped. Use with watch_file or
+  watch_source to live-reload settings defined inline in source code.
+
+SourceSettings::parse(src: &str) -> SourceSettings
+  Parse the given source text and populate the maps.
+
+.str(&self, key: &str) -> Option<String>
+.f32(&self, key: &str) -> Option<f32>
+.usize(&self, key: &str) -> Option<usize>
+
+  Example:
+    cv.watch_file("src/app.rs", move |_cv, bytes| {
+        let Ok(src) = std::str::from_utf8(bytes) else { return };
+        let p = SourceSettings::parse(src);
+        let bg        = p.str("bg").unwrap_or("#1e1e2e".into());
+        let font_size = p.f32("font_size").unwrap_or(16.0);
+        let tab_size  = p.usize("tab_size").unwrap_or(4);
+    });
+
+--------------------------------------------------------------------------------
+  TRAIT: FromSource  (file_watcher.rs)
+--------------------------------------------------------------------------------
+
+pub trait FromSource: Sized {
+    fn from_source(p: &SourceSettings) -> Self;
+}
+
+  Implement on a settings struct to enable Canvas::watch_source.
+  from_source receives a parsed SourceSettings and must return a new Self.
+  Example:
+    impl FromSource for MySettings {
+        fn from_source(p: &SourceSettings) -> Self {
+            Self {
+                font_size: p.f32("font_size").unwrap_or(16.0),
+                tab_size:  p.usize("tab_size").unwrap_or(4),
+            }
+        }
+    }
+
+--------------------------------------------------------------------------------
   MODULE: Text Utilities  (text.rs)
 --------------------------------------------------------------------------------
 
@@ -767,7 +877,8 @@ TextSpec  (struct, Clone, Debug)
 TextSpec::new(spans: Vec<SpanSpec>, align: Align) -> TextSpec
 TextSpec::build(&self, scale: f32) -> Text
   Scales all size and spacing fields by scale and returns a prism Text ready
-  for rendering. Called automatically each tick by update_text_scale.
+  for rendering. Results are cached; rebuilds only when span text, color,
+  or scale changes. Called automatically each tick by update_text_scale.
 
 make_text(text, font_size, font, color) -> TextSpec
   Centred single span, line_height = font_size * 1.35.
@@ -780,6 +891,59 @@ make_text_multi(spans: Vec<(String, f32, Font, Color)>, align: Align) -> TextSpe
 
 [UPDATED 2026-03-31] Action::set_text(...) uses Text payload.
 TextSpec remains available through GameObject::set_text(spec) and helper builders.
+
+--------------------------------------------------------------------------------
+  MODULE: Value / Expr  (value.rs)
+--------------------------------------------------------------------------------
+
+Value  (enum, Debug, Clone)
+  A dynamically-typed value used in expression trees and game state.
+  Variants: I8, U8, I16, U16, I32, U32, I64, U64, F32, F64, Usize, Bool, Str
+
+  .to_display_string(&self) -> String
+    Converts to a human-readable string. F32 and F64 are formatted to 2
+    decimal places; all integer types use their natural Display; Bool uses
+    "true"/"false"; Str returns the inner string.
+
+  From<T> impls for all primitive types and &str / String.
+
+MathOp  (enum, Debug, Clone)
+  Variants: Add, Sub, Mul, Div
+
+CompOp  (enum, Debug, Clone)
+  Variants: Eq, Ne, Gt, Lt, Gte, Lte
+
+Expr  (enum, Debug, Clone)
+  An expression tree that can be evaluated against a variable map.
+  Variants:
+    Lit(Value)
+    Var(String)                          — looked up in vars at eval time
+    Add(Box<Expr>, Box<Expr>)
+    Sub(Box<Expr>, Box<Expr>)
+    Mul(Box<Expr>, Box<Expr>)
+    Div(Box<Expr>, Box<Expr>)
+    Format { template: String, args: Vec<Expr> }
+      Replaces {0}, {1}, … in template with the display strings of each arg.
+
+  Constructor helpers:
+    Expr::var(name) / Expr::str(s)
+    Expr::u8 / i8 / u16 / i16 / u32 / i32 / u64 / i64 / f32 / f64 / usize
+    Expr::add(a, b) / sub(a, b) / mul(a, b) / div(a, b)
+
+  From<T> impls mirror Value: all primitive types and &str / String.
+
+resolve_expr(expr: &Expr, vars: &HashMap<String, Value>) -> Option<Value>
+  Evaluate an expression tree. Returns None if a Var is missing from the
+  map or if operand types are mismatched.
+
+apply_op(left: &Value, right: &Value, op: &MathOp) -> Option<Value>
+  Apply a MathOp to two Values of the same type. Returns None on type
+  mismatch. Integer division by zero returns 0; float division by 0.0
+  returns 0.0. String + String concatenates; other string ops return None.
+
+compare_operands(left: &Value, right: &Value, op: &CompOp) -> Option<bool>
+  Compare two Values with a CompOp. Returns None on type mismatch.
+  Bool only supports Eq and Ne (other ops return false).
 
 --------------------------------------------------------------------------------
   MODULE: SoundOptions  (sound.rs)
@@ -877,6 +1041,7 @@ Canvas::update_objects(delta_time: f32)         (pub(crate))
 Canvas::apply_camera_transform()                (pub(crate))
 Canvas::handle_collisions()                     (pub(crate))
 Canvas::handle_infinite_scroll()                (pub(crate))
+Canvas::process_hot_reloads(delta_time: f32)    (pub(crate))
 Canvas::check_collision(o1, o2) -> bool         (pub(crate))
 Canvas::evaluate_condition(condition) -> bool   (pub(crate))
 Canvas::trigger_collision_events(idx: usize)    (pub(crate))

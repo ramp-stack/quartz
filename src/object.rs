@@ -8,13 +8,39 @@ use crate::sprite::AnimatedSprite;
 use crate::types::{CollisionMode, Anchor, GlowConfig, HighlightEffect};
 use std::cell::Cell;
 
+/// Reads and clears the thread-local path set by `load_image` / `load_animation`,
+/// and records the file's current mtime alongside it.
+fn capture_asset_path() -> (Option<String>, Option<std::time::SystemTime>) {
+    let path = LAST_ASSET_PATH.with(|p| p.borrow_mut().take());
+    let mtime = path.as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok());
+    (path, mtime)
+}
+
 #[derive(Clone, Debug)]
 pub struct GameObject {
-    layout:           prism::layout::Stack,
-    pub id:           String,
-    pub tags:         Vec<String>,
-    drawable:         Option<Box<dyn Drawable>>,
+    layout:              prism::layout::Stack,
+    pub id:              String,
+    pub tags:            Vec<String>,
+    drawable:            Option<Box<dyn Drawable>>,
     pub animated_sprite: Option<AnimatedSprite>,
+    pub size:            (f32, f32),
+    pub position:        (f32, f32),
+    pub momentum:        (f32, f32),
+    pub resistance:      (f32, f32),
+    pub gravity:         f32,
+    pub scaled_size:     Cell<(f32, f32)>,
+    pub is_platform:     bool,
+    pub visible:         bool,
+    pub layer:           Option<u32>,
+    text_spec:           Option<TextSpec>,
+    last_text_scale:     Cell<f32>,
+    // hot-reload tracking — populated automatically when load_image / load_animation is used
+    pub(crate) image_path:      Option<String>,
+    pub(crate) animation_path:  Option<String>,
+    pub(crate) image_mtime:     Option<std::time::SystemTime>,
+    pub(crate) animation_mtime: Option<std::time::SystemTime>,
     pub size:         (f32, f32),
     pub position:     (f32, f32),
     pub momentum:     (f32, f32),
@@ -92,6 +118,8 @@ impl GameObject {
         GameObjectBuilder {
             id:          id.into(),
             image:       None,
+            image_path:  None,
+            image_mtime: None,
             size:        (100.0, 100.0),
             position:    (0.0, 0.0),
             tags:        vec![],
@@ -123,6 +151,7 @@ impl GameObject {
         resistance: (f32, f32),
         gravity: f32,
     ) -> Self {
+        let (image_path, image_mtime) = if drawable.is_some() { capture_asset_path() } else { (None, None) };
         Self {
             layout:          prism::layout::Stack::default(),
             id,
@@ -152,6 +181,10 @@ impl GameObject {
             grounded:           false,
             text_spec:       None,
             last_text_scale: Cell::new(0.0),
+            image_path,
+            image_mtime,
+            animation_path:  None,
+            animation_mtime: None,
         }
     }
 
@@ -166,6 +199,7 @@ impl GameObject {
         resistance: (f32, f32),
         gravity: f32,
     ) -> Self {
+        let (image_path, image_mtime) = if drawable.is_some() { capture_asset_path() } else { (None, None) };
         Self {
             layout:          prism::layout::Stack::default(),
             id,
@@ -195,15 +229,29 @@ impl GameObject {
             grounded:           false,
             text_spec:       None,
             last_text_scale: Cell::new(0.0),
+            image_path,
+            image_mtime,
+            animation_path:  None,
+            animation_mtime: None,
         }
     }
 
     pub fn with_animation(mut self, animated_sprite: AnimatedSprite) -> Self {
+        let (path, mtime) = capture_asset_path();
+        if path.is_some() {
+            self.animation_path  = path;
+            self.animation_mtime = mtime;
+        }
         self.animated_sprite = Some(animated_sprite);
         self
     }
 
     pub fn with_image(mut self, image: Image) -> Self {
+        let (path, mtime) = capture_asset_path();
+        if path.is_some() {
+            self.image_path  = path;
+            self.image_mtime = mtime;
+        }
         self.drawable = Some(Box::new(image));
         self
     }
@@ -243,10 +291,20 @@ impl GameObject {
     }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
+        let (path, mtime) = capture_asset_path();
+        if path.is_some() {
+            self.animation_path  = path;
+            self.animation_mtime = mtime;
+        }
         self.animated_sprite = Some(animated_sprite);
     }
 
     pub fn set_image(&mut self, image: Image) {
+        let (path, mtime) = capture_asset_path();
+        if path.is_some() {
+            self.image_path  = path;
+            self.image_mtime = mtime;
+        }
         self.text_spec = None;
         self.last_text_scale.set(0.0);
         self.drawable  = Some(Box::new(image));
@@ -440,7 +498,7 @@ impl GameObject {
         if self.text_spec.is_none() { return; }
         if (self.last_text_scale.get() - scale).abs() < 0.0001 { return; }
 
-        if let Some(spec) = &self.text_spec {
+        if let Some(spec) = &mut self.text_spec {
             let text = spec.build(scale);
             self.drawable = Some(Box::new(text));
         }
@@ -468,6 +526,42 @@ impl GameObject {
             && point.1 <= self.position.1 + self.size.1
     }
 
+    // ── Hot-reload internals ─────────────────────────────────────────────────
+
+    /// Called by the canvas tick. Reloads the image from disk if the file has
+    /// changed since the last poll. No-op if the object has no tracked path.
+    pub(crate) fn hot_reload_image(&mut self, path: &str) {
+        let Ok(meta)  = std::fs::metadata(path) else { return };
+        let Ok(mtime) = meta.modified()          else { return };
+        if Some(mtime) == self.image_mtime { return; }
+
+        let img = reload_image_raw(path, self.size);
+        self.image_mtime = Some(mtime);
+        self.text_spec   = None;
+        self.last_text_scale.set(0.0);
+        self.drawable    = Some(Box::new(img));
+        println!("[hot-reload] image reloaded: {path}");
+    }
+
+    /// Called by the canvas tick. Reloads the animation from disk if the file
+    /// has changed since the last poll. No-op if the object has no tracked path.
+    pub(crate) fn hot_reload_animation(&mut self, path: &str) {
+        let Ok(meta)  = std::fs::metadata(path) else { return };
+        let Ok(mtime) = meta.modified()          else { return };
+        if Some(mtime) == self.animation_mtime { return; }
+
+        let fps  = self.animated_sprite.as_ref().map(|s| s.fps()).unwrap_or(12.0);
+        let size = self.size;
+        match std::fs::read(path) {
+            Ok(bytes) => match AnimatedSprite::decode_vec(bytes, size, fps) {
+                Ok(sprite) => {
+                    self.animated_sprite   = Some(sprite);
+                    self.animation_mtime   = Some(mtime);
+                    println!("[hot-reload] animation reloaded: {path}");
+                }
+                Err(e) => eprintln!("[hot-reload] failed to decode animation '{path}': {e}"),
+            },
+            Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
     pub fn apply_rotation_momentum(&mut self) {
         if self.rotation_momentum == 0.0 { return; }
         self.rotation += self.rotation_momentum;
@@ -532,9 +626,13 @@ impl GameObject {
     }
 }
 
+// ── Builder ──────────────────────────────────────────────────────────────────
+
 pub struct GameObjectBuilder {
     id:          String,
     image:       Option<Image>,
+    image_path:  Option<String>,
+    image_mtime: Option<std::time::SystemTime>,
     size:        (f32, f32),
     position:    (f32, f32),
     tags:        Vec<String>,
@@ -561,6 +659,10 @@ impl GameObjectBuilder {
     }
 
     pub fn image(mut self, image: Image) -> Self {
+        // Capture path here while the thread-local is still hot from load_image / load_image_sized.
+        let (path, mtime) = capture_asset_path();
+        self.image_path  = path;
+        self.image_mtime = mtime;
         self.image = Some(image);
         self
     }
@@ -739,6 +841,10 @@ impl GameObjectBuilder {
             grounded:        false,
             text_spec:       None,
             last_text_scale: Cell::new(0.0),
+            image_path:      self.image_path,
+            image_mtime:     self.image_mtime,
+            animation_path:  None,
+            animation_mtime: None,
         };
         if let Some(effect) = highlight {
             obj.set_highlight(effect);
