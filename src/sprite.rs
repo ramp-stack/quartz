@@ -2,7 +2,7 @@ use prism::canvas::{Image, ShapeType, Color};
 use image::{RgbaImage, Rgba, AnimationDecoder, imageops};
 use std::io::Cursor;
 use prism::drawable::{Drawable, SizedTree, Rect};
-
+use std::cell::RefCell;
 
 
 pub fn solid_circle(size: f32, color: Color) -> Image {

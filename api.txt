@@ -1,111 +1,75 @@
 ================================================================================
-  GAME ENGINE — FULL PUBLIC API REFERENCE
+  QUARTZ GAME ENGINE — FULL PUBLIC API REFERENCE
 ================================================================================
 
 --------------------------------------------------------------------------------
-  MODULE: Canvas  (canvas.rs / lib.rs)
+  FILE LAYOUT
+--------------------------------------------------------------------------------
+
+src/
+  lib.rs                    module declarations + flat re-exports (no logic)
+
+  canvas/
+    mod.rs                  re-exports Canvas, CanvasMode, CanvasLayout
+    core.rs                 Canvas struct, CanvasMode enum, CanvasLayout struct
+    actions.rs              Canvas::new, run(), object management, vars, pause
+    physics.rs              collision detection/resolution, object update loop
+    events.rs               OnEvent impl, tick loop
+    watch.rs                watch_file, watch_source
+    location.rs             Location::resolve_position
+
+  types/
+    mod.rs                  re-exports everything flat (no logic)
+    targeting.rs            Target, Location, Anchor
+    collision.rs            CollisionMode, CollisionShape
+    effects.rs              GlowConfig, HighlightEffect
+    input_types.rs          MouseButton, ScrollAxis
+    condition.rs            Condition, ConditionOps
+    action.rs               Action enum + all builder methods
+    event.rs                GameEvent enum
+
+  object.rs                 GameObject, GameObjectBuilder
+  sprite.rs                 AnimatedSprite, image helpers
+  value.rs                  Value, Expr, MathOp, CompOp
+  store.rs                  ObjectStore
+  input.rs                  InputState, MouseState, CallbackStore
+  scene.rs                  Scene, SceneManager
+  camera.rs                 Camera
+  sound.rs                  SoundOptions, SoundHandle, spawn_sound
+  text.rs                   TextSpec, SpanSpec, make_text helpers
+  entropy.rs                Entropy
+  lerp.rs                   Lerp
+  expr.rs                   parse_condition, parse_action
+  file_watcher.rs           Shared<T>, SourceSettings, FromSource, FileWatcher
+
+IMPORT RULES
+  Files inside src/types/ reference siblings via super::
+    e.g.  use super::targeting::Target;
+  Files outside src/types/ use the flat re-exports via crate::types::
+    e.g.  use crate::types::Target;
+  lib.rs contains only pub mod declarations and pub use re-exports.
+  No logic, no stale use statements at the top of lib.rs.
+
+--------------------------------------------------------------------------------
+  MODULE: Canvas  (canvas/)
 --------------------------------------------------------------------------------
 
 Canvas::new(ctx: &mut Context, mode: CanvasMode) -> Canvas
-  Creates a new Canvas instance.
-  Parameters:
-    ctx  - Mutable reference to the rendering context (unused, reserved for
-           future use).
-    mode - CanvasMode::Landscape | Portrait | Fullscreen. Controls the virtual
-           resolution and aspect ratio of the canvas.
-  Returns:
-    A fully initialised Canvas with empty object store, input, mouse, callback,
-    and scene manager state.
-  Implementation:
-    Calls mode.virtual_resolution() to derive the initial canvas_size cell.
-    Sets scale to 1.0 and safe_area_offset to (0,0). Constructs all sub-stores
-    (ObjectStore, InputState, MouseState, CallbackStore, SceneManager) via their
-    own ::new() constructors.
+  Creates a new Canvas. ctx is unused (reserved for future use).
+  mode sets the virtual resolution and aspect ratio.
+  All sub-stores (ObjectStore, InputState, MouseState, CallbackStore,
+  SceneManager) are initialised empty.
 
 --------------------------------------------------------------------------------
 
 Canvas::key(name: &str) -> bool
-  Returns true if the named key is currently held down.
-  Parameters:
-    name - Human-readable key name: "left", "right", "up", "down", "space",
-           "enter", "tab", "del", or any single-character string (e.g. "a").
-  Returns:
-    bool — true if the key is in the held_keys set.
+  Returns true if the named key is currently held.
+  Accepted names: "left", "right", "up", "down", "space", "enter",
+  "tab", "del", or any single-character string (e.g. "a").
 
---------------------------------------------------------------------------------
-
-Canvas::add_game_object(name: String, obj: GameObject)
-  Registers a new game object in the canvas.
-  Parameters:
-    name - Unique string name used to look up the object later.
-    obj  - The GameObject to add.
-
---------------------------------------------------------------------------------
-
-Canvas::remove_game_object(name: &str)
-  Removes a named game object and cleans up all related state.
-
---------------------------------------------------------------------------------
-
-Canvas::get_game_object(name: &str) -> Option<&GameObject>
-  Returns a shared reference to the named game object.
-
---------------------------------------------------------------------------------
-
-Canvas::get_game_object_mut(name: &str) -> Option<&mut GameObject>
-  Returns a mutable reference to the named game object.
-
---------------------------------------------------------------------------------
-
-Canvas::run(action: Action)
-  Executes a game Action immediately on the canvas.
-
---------------------------------------------------------------------------------
-
-Canvas::add_event(event: GameEvent, target: Target)
-  Attaches a GameEvent to every object matched by target.
-
---------------------------------------------------------------------------------
-
-Canvas::on_update<F>(callback: F)
-  Registers a callback to be called once every tick (frame).
-  Parameters:
-    callback - FnMut(&mut Canvas) + Clone + 'static
-
---------------------------------------------------------------------------------
-
-Canvas::register_custom_event<F>(name: String, handler: F)
-  Registers a named custom event handler.
-
---------------------------------------------------------------------------------
-
-Canvas::set_camera(camera: Camera)
-Canvas::clear_camera()
-Canvas::camera() -> Option<&Camera>
-Canvas::camera_mut() -> Option<&mut Camera>
-
---------------------------------------------------------------------------------
-
-Canvas::collision_between(t1: &Target, t2: &Target) -> bool
-  Tests whether any object in t1 overlaps any object in t2.
-
---------------------------------------------------------------------------------
-
-Canvas::objects_in_radius(game_object: &GameObject, radius_px: f32) -> Vec<&GameObject>
-  Returns all visible objects whose centre falls within radius_px of
-  game_object's centre.
-
---------------------------------------------------------------------------------
-
-Canvas::canvas_size() -> (f32, f32)
-Canvas::get_virtual_size() -> (f32, f32)
-  Both return the virtual canvas size (width, height) in virtual pixels.
-  canvas_size() is the preferred form; get_virtual_size() is an alias.
-
---------------------------------------------------------------------------------
-
-Canvas::play_sound(file_path: &str) -> SoundHandle
-Canvas::play_sound_with(file_path: &str, options: SoundOptions) -> SoundHandle
+Canvas::is_key_held(key: &Key) -> bool
+Canvas::on_key_press(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+Canvas::on_key_release(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
 
 --------------------------------------------------------------------------------
 
@@ -117,9 +81,51 @@ Canvas::mouse_position() -> Option<(f32, f32)>
 
 --------------------------------------------------------------------------------
 
-Canvas::on_key_press(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
-Canvas::on_key_release(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
-Canvas::is_key_held(key: &Key) -> bool
+Canvas::add_game_object(name: String, obj: GameObject)
+Canvas::remove_game_object(name: &str)
+Canvas::get_game_object(name: &str) -> Option<&GameObject>
+Canvas::get_game_object_mut(name: &str) -> Option<&mut GameObject>
+
+--------------------------------------------------------------------------------
+
+Canvas::on_update<F>(callback: F)
+  F: FnMut(&mut Canvas) + Clone + 'static
+  Registers a callback fired once every tick.
+
+Canvas::register_custom_event<F>(name: String, handler: F)
+  F: FnMut(&mut Canvas) + Clone + 'static
+
+--------------------------------------------------------------------------------
+
+Canvas::run(action: Action)
+  Executes an Action immediately.
+
+Canvas::add_event(event: GameEvent, target: Target)
+  Attaches a GameEvent to every object matched by target.
+
+--------------------------------------------------------------------------------
+
+Canvas::set_camera(camera: Camera)
+Canvas::clear_camera()
+Canvas::camera() -> Option<&Camera>
+Canvas::camera_mut() -> Option<&mut Camera>
+
+--------------------------------------------------------------------------------
+
+Canvas::collision_between(t1: &Target, t2: &Target) -> bool
+  True if any object in t1 overlaps any object in t2.
+
+Canvas::objects_in_radius(game_object: &GameObject, radius_px: f32) -> Vec<&GameObject>
+  Returns all visible objects whose centre falls within radius_px of
+  game_object's centre.
+
+--------------------------------------------------------------------------------
+
+Canvas::canvas_size() -> (f32, f32)      preferred
+Canvas::get_virtual_size() -> (f32, f32) alias
+
+Canvas::play_sound(file_path: &str) -> SoundHandle
+Canvas::play_sound_with(file_path: &str, options: SoundOptions) -> SoundHandle
 
 --------------------------------------------------------------------------------
 
@@ -128,12 +134,12 @@ Canvas::load_scene(name: &str)
 Canvas::active_scene() -> Option<&str>
 Canvas::is_scene(name: &str) -> bool
 
-Canvas::pause()                                                   [NEW 2026-03-31]
-Canvas::resume()                                                  [NEW 2026-03-31]
-Canvas::is_paused() -> bool                                       [NEW 2026-03-31]
+Canvas::pause()
+Canvas::resume()
+Canvas::is_paused() -> bool
 
 --------------------------------------------------------------------------------
-  CANVAS — Game Variables  (canvas.rs)                            [NEW 2026-03-31]
+  CANVAS — Game Variables  (canvas/actions.rs)
 --------------------------------------------------------------------------------
 
 Canvas::set_var(name: impl Into<String>, value: impl Into<Value>)
@@ -143,7 +149,7 @@ Canvas::remove_var(name: &str)
 Canvas::resolve(expr: &Expr) -> Option<Value>
 Canvas::modify_var(name: &str, f: impl FnOnce(Value) -> Value)
 
-Typed getters (panic on missing key or wrong type):               [UPDATED 2026-03-31]
+Typed getters — panic with a descriptive message on missing key or wrong type:
 Canvas::get_u8(name: &str) -> u8
 Canvas::get_u32(name: &str) -> u32
 Canvas::get_i32(name: &str) -> i32
@@ -151,190 +157,230 @@ Canvas::get_f32(name: &str) -> f32
 Canvas::get_bool(name: &str) -> bool
 Canvas::get_usize(name: &str) -> usize
 Canvas::get_str(name: &str) -> &str
-  These panic with a descriptive message if the key is missing or holds a
-  different Value variant. For optional access, use get_var() or has_var()
-  before calling a typed getter.
 
-Typed modifiers (panic on missing key or mismatched type): [UPDATED 2026-03-31]
-Canvas::modify_u8(name: &str, f: impl FnOnce(u8) -> u8)
-Canvas::modify_u32(name: &str, f: impl FnOnce(u32) -> u32)
-Canvas::modify_i32(name: &str, f: impl FnOnce(i32) -> i32)
-Canvas::modify_f32(name: &str, f: impl FnOnce(f32) -> f32)
-Canvas::modify_bool(name: &str, f: impl FnOnce(bool) -> bool)
-Canvas::modify_usize(name: &str, f: impl FnOnce(usize) -> usize)
-Canvas::modify_str(name: &str, f: impl FnOnce(String) -> String)
+Typed modifiers — same panic behaviour:
+Canvas::modify_u8(name, f: impl FnOnce(u8)     -> u8)
+Canvas::modify_u32(name, f: impl FnOnce(u32)   -> u32)
+Canvas::modify_i32(name, f: impl FnOnce(i32)   -> i32)
+Canvas::modify_f32(name, f: impl FnOnce(f32)   -> f32)
+Canvas::modify_bool(name, f: impl FnOnce(bool) -> bool)
+Canvas::modify_usize(name, f: impl FnOnce(usize) -> usize)
+Canvas::modify_str(name, f: impl FnOnce(String) -> String)
 
 --------------------------------------------------------------------------------
-  CANVAS — HOT RELOAD  (canvas.rs / file_watcher.rs)
+  CANVAS — Hot Reload  (canvas/watch.rs)
 --------------------------------------------------------------------------------
 
 Canvas::watch_file<F>(path: impl Into<String>, handler: F)
-  Watch any file on disk. The callback fires every time the file's modification
-  time changes, receiving the full file contents as a byte slice.
-  Parameters:
-    path    - Path to the file to watch.
-    handler - FnMut(&mut Canvas, &[u8]) + Clone + 'static
-  Notes:
-    Suitable for config files, theme files, shaders — anything that is not an
-    image or animation (those are hot-reloaded automatically via load_image /
-    load_animation). The poll interval is 0.5 s.
+  F: FnMut(&mut Canvas, &[u8]) + Clone + 'static
+  Fires whenever the file's modification time changes. Poll interval: 0.5 s.
+  Use for config files, theme files, shaders. Images and animations hot-reload
+  automatically when loaded via load_image / load_animation.
 
 Canvas::watch_source<T>(path: impl Into<String>, target: Shared<T>)
-  Watch a Rust source file and automatically parse + update a Shared<T>
-  whenever the file changes on disk. T must implement FromSource.
-  Check shared.changed() inside on_update to react to the new value.
-  Parameters:
-    path   - Path to the .rs source file.
-    target - A Shared<T> that will be updated with the parsed value.
+  T: FromSource + Clone + 'static
+  Parses a Rust source file and updates target on every change.
+  Check target.changed() inside on_update to react to the new value.
   Example:
     cv.watch_source("src/app.rs", settings.clone());
     // inside on_update:
-    if settings.changed() {
-        rebuild_ui(cv, &settings.get());
-    }
+    if settings.changed() { rebuild_ui(cv, &settings.get()); }
 
 --------------------------------------------------------------------------------
-  CANVAS — DRAWING HELPERS  (apis.rs)
+  CANVAS — Internal (pub(crate)) — called automatically each tick
 --------------------------------------------------------------------------------
 
-These methods replace the old Rect helper struct. All rect/label creation and
-mutation is done directly on the canvas.
-
-Canvas::add_rect(name: &str, x: f32, y: f32, w: f32, h: f32, color: Color, tag: &str)
-  Add a solid colored rectangle as a named game object.
-  No Context parameter required.
-
-Canvas::set_rect(name: &str, x: f32, y: f32, w: f32, h: f32, color: Color)
-  Update geometry AND color of an existing rect in-place. Rebuilds the pixel
-  buffer — only call when color actually changes. For position/size-only
-  updates use set_bounds instead.
-  No-op if the object does not exist.
-
-Canvas::set_bounds(name: &str, x: f32, y: f32, w: f32, h: f32)
-  Update position and size only — no pixel buffer allocation.
-  Use this instead of set_rect when the color is unchanged.
-  No-op if the object does not exist.
-
-Canvas::add_label(name: &str, text: &str, x: f32, y: f32, size: f32, color: Color, font: Font, tag: &str)
-  Add a text label. Width is estimated from font size and character count.
-  No Context parameter required.
-
-Canvas::add_label_obj(name: &str, spec: TextSpec, size: (f32, f32), pos: (f32, f32), tag: &str)
-  Add a label from a pre-built TextSpec with an explicit bounding size and
-  position. Used when the caller has already constructed the TextSpec
-  (e.g. a formatted gutter line number).
-  No Context parameter required.
-
-Canvas::set_pos(name: &str, x: f32, y: f32)
-  Move a named object. No-op if it does not exist.
-
-Canvas::show(name: &str)
-  Set a named object visible.
-
-Canvas::hide(name: &str)
-  Set a named object hidden.
-
-Canvas::set_visible(name: &str, visible: bool)
-  Set visibility directly. Cheaper than show/hide for tight loops since it
-  bypasses the Action dispatch path.
-
-Canvas::stamp(src: &str, name: String, pos: (f32, f32), visible: bool) -> bool
-  Clone a template object into a new named object at pos with the given
-  visibility. All fields are copied from src; only position and visible are
-  overridden. Returns false if src does not exist.
-  Use this to instantiate pre-built character or sprite templates efficiently.
-
-Canvas::raise(name: &str)
-  Re-insert a named object at the top of the draw order by removing and
-  re-adding it. No-op if it does not exist.
+Canvas::update_objects(delta_time: f32)
+Canvas::apply_camera_transform()
+Canvas::handle_collisions()
+Canvas::handle_infinite_scroll()
+Canvas::process_hot_reloads(delta_time: f32)
+Canvas::check_collision(o1: &GameObject, o2: &GameObject) -> bool
+Canvas::evaluate_condition(condition: &Condition) -> bool
+Canvas::trigger_collision_events(idx: usize)
+Canvas::trigger_boundary_collision_events(idx: usize)
+Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)
 
 --------------------------------------------------------------------------------
-  CANVAS — FREE UTILITIES  (apis.rs)
+  MODULE: CanvasMode  (canvas/core.rs)
 --------------------------------------------------------------------------------
 
-node_name(id: &str, suffix: &str) -> String
-  Build a scoped object name: "{id}_{suffix}".
-  Use this to keep object naming consistent across components without a
-  shared helper struct.
-  Example: node_name("editor_main", "cursor") → "editor_main_cursor"
+CanvasMode  (enum, Debug, Clone, Copy, PartialEq)
+  Landscape   16:9 aspect ratio, virtual resolution 3840x2160
+  Portrait    9:16 aspect ratio, virtual resolution 2160x3840
+  Fullscreen  no virtual resolution; renders at actual window size, scale 1.0
 
 --------------------------------------------------------------------------------
-  MODULE: CanvasMode  (lib.rs)
+  MODULE: CanvasLayout  (canvas/core.rs)
 --------------------------------------------------------------------------------
 
-CanvasMode  (enum)
-  Variants:
-    Landscape  - 16:9 aspect ratio, virtual resolution 3840×2160.
-    Portrait   - 9:16 aspect ratio, virtual resolution 2160×3840.
-    Fullscreen - No virtual resolution; renders at actual window size, scale 1.
-
-CanvasMode::aspect_ratio() -> f32  (pub(crate))
-CanvasMode::virtual_resolution() -> Option<(f32, f32)>  (pub(crate))
-
---------------------------------------------------------------------------------
-  MODULE: CanvasLayout  (lib.rs)
---------------------------------------------------------------------------------
-
-CanvasLayout implements Layout (prism):
+Implements prism::layout::Layout.
 
   request_size(_children) -> SizeRequest
     Returns SizeRequest(0, 0, MAX, MAX) — takes all available space.
 
   build(size: (f32,f32), children: Vec<SizeRequest>) -> Vec<Area>
-    Computes the scale factor and letterbox padding from the window size vs.
-    virtual resolution, stores them in Cell fields, then maps each (offset,
-    child) pair to an Area { offset: offset*scale+padding, size: size*scale }.
+    Computes scale factor and letterbox padding from window size vs virtual
+    resolution. Maps each (offset, child) pair to an Area with scaled
+    coordinates.
+
+  Fields (pub):
+    offsets:          Vec<(f32, f32)>
+    canvas_size:      Cell<(f32, f32)>
+    mode:             CanvasMode
+    scale:            Cell<f32>
+    safe_area_offset: Cell<(f32, f32)>
 
 --------------------------------------------------------------------------------
-  MODULE: Action  (types.rs)
+  MODULE: Target / Location / Anchor  (types/targeting.rs)
+--------------------------------------------------------------------------------
+
+Target  (enum, Debug, Clone)
+  ByName(String)
+  ById(String)
+  ByTag(String)
+
+  Target::name(s: impl Into<String>) -> Target
+  Target::id(s: impl Into<String>)   -> Target
+  Target::tag(s: impl Into<String>)  -> Target
+
+Anchor  (struct, Debug, Clone, Copy)
+  Fields: x: f32, y: f32
+  Normalised object space. (0,0) = top-left, (1,1) = bottom-right.
+
+Location  (enum, Debug, Clone)
+  Position((f32, f32))
+  Between(Box<Target>, Box<Target>)
+  AtTarget(Box<Target>)
+  Relative { target: Box<Target>, offset: (f32, f32) }
+  OnTarget  { target: Box<Target>, anchor: Anchor, offset: (f32, f32) }
+
+  Location::at(x: f32, y: f32) -> Location
+  Location::at_target(target: Target) -> Location
+  Location::between(t1: Target, t2: Target) -> Location
+  Location::relative_to(target: Target, offset: (f32, f32)) -> Location
+  Location::on_target(target: Target, anchor: Anchor, offset: (f32, f32)) -> Location
+
+  Location::resolve_position(store: &ObjectStore) -> (f32, f32)   pub(crate)
+    Implemented in canvas/location.rs.
+
+--------------------------------------------------------------------------------
+  MODULE: CollisionMode / CollisionShape  (types/collision.rs)
+--------------------------------------------------------------------------------
+
+CollisionShape  (enum, Debug, Clone)
+  Rectangle
+  Circle { radius: f32 }
+
+  CollisionShape::circle(radius: f32) -> CollisionShape
+  CollisionShape::circle_auto() -> CollisionShape
+
+CollisionMode  (enum, Debug, Clone)
+  NonPlatform   not treated as a platform
+  Surface       objects land on it; uses surface_normal for resolution
+  Solid(CollisionShape)   full solid; objects cannot pass through any face
+
+  CollisionMode::non_platform() -> CollisionMode
+  CollisionMode::solid() -> CollisionMode
+  CollisionMode::solid_circle(radius: f32) -> CollisionMode
+
+--------------------------------------------------------------------------------
+  MODULE: GlowConfig / HighlightEffect  (types/effects.rs)
+--------------------------------------------------------------------------------
+
+GlowConfig  (struct, Debug, Clone)
+  Fields: color: Color, width: f32
+
+HighlightEffect  (struct, Debug, Clone, Default)
+  Fields: tint: Option<Color>, glow: Option<GlowConfig>
+
+--------------------------------------------------------------------------------
+  MODULE: MouseButton / ScrollAxis  (types/input_types.rs)
+--------------------------------------------------------------------------------
+
+MouseButton  (enum, Debug, Clone, Copy, PartialEq, Eq, Hash)
+  Left, Right, Middle
+
+ScrollAxis  (enum, Debug, Clone, Copy, PartialEq, Eq)
+  Up, Down, Left, Right
+
+--------------------------------------------------------------------------------
+  MODULE: Condition  (types/condition.rs)
+--------------------------------------------------------------------------------
+
+Condition  (enum, Debug, Clone)
+  Always
+  KeyHeld(Key) / KeyNotHeld(Key)
+  Collision(Target) / NoCollision(Target)
+  And(Box<Condition>, Box<Condition>)
+  Or(Box<Condition>, Box<Condition>)
+  Not(Box<Condition>)
+  IsVisible(Target) / IsHidden(Target)
+  Compare(Expr, CompOp, Expr)
+  VarExists(String)
+  Grounded(Target)
+  Expr(String)          parsed lazily at runtime; use expr_checked to validate
+  HasTag(Target, String)
+
+  Condition::expr(s: impl Into<String>) -> Condition
+  Condition::expr_checked(s: impl Into<String>) -> Result<Condition, String>
+
+ConditionOps  (trait)
+  condition.and(other: Condition) -> Condition
+  condition.or(other: Condition)  -> Condition
+  condition.not()                 -> Condition
+
+--------------------------------------------------------------------------------
+  MODULE: Action  (types/action.rs)
 --------------------------------------------------------------------------------
 
 Action  (enum, Clone, Debug)
-  All variants accepted by Canvas::run().
 
-  ApplyMomentum   { target: Target, value: (f32, f32) }
-  SetMomentum     { target: Target, value: (f32, f32) }
-  SetResistance   { target: Target, value: (f32, f32) }
-  Spawn           { object: Box<GameObject>, location: Location }
-  Remove          { target: Target }
-  TransferMomentum{ from: Target, to: Target, scale: f32 }
-  SetAnimation    { target: Target, animation_bytes: &'static [u8], fps: f32 }
-  Teleport        { target: Target, location: Location }
-  Show            { target: Target }
-  Hide            { target: Target }
-  Toggle          { target: Target }
-  Conditional     { condition: Condition, if_true: Box<Action>, if_false: Option<Box<Action>> }
-  Custom          { name: String }
-  SetVar          { name: String, value: Expr }                   [NEW 2026-03-31]
-  ModVar          { name: String, op: MathOp, operand: Expr }    [NEW 2026-03-31]
-  Multi           (Vec<Action>)                                   [NEW 2026-03-31]
-  PlaySound       { path: String, options: SoundOptions }         [NEW 2026-03-31]
-  SetGravity      { target: Target, value: f32 }                  [NEW 2026-03-31]
-  SetSize         { target: Target, value: (f32, f32) }           [NEW 2026-03-31]
-  AddTag          { target: Target, tag: String }                 [NEW 2026-03-31]
-  RemoveTag       { target: Target, tag: String }                 [NEW 2026-03-31]
-  SetText         { target: Target, text: Text }                  [NEW 2026-03-31]
-  Expr            (String)                                        [NEW 2026-03-31]
-  SetRotation     { target: Target, value: f32 }                  [NEW 2026-03-31]
-  SetSlope        { target: Target, left_offset: f32, right_offset: f32, auto_rotate: bool }
-  AddRotation     { target: Target, value: f32 }                  [NEW 2026-03-31]
-  ApplyRotation   { target: Target, value: f32 }                  [NEW 2026-03-31]
-  SetSurfaceNormal{ target: Target, nx: f32, ny: f32 }            [NEW 2026-03-31]
-  SetCollisionMode{ target: Target, mode: CollisionMode }         [NEW 2026-03-31]
-  SetGlow         { target: Target, color: Color, width: f32 }    [NEW 2026-03-31]
-  ClearGlow       { target: Target }                              [NEW 2026-03-31]
-  SetTint         { target: Target, color: Color }                [NEW 2026-03-31]
-  ClearTint       { target: Target }                              [NEW 2026-03-31]
+  ApplyMomentum    { target: Target, value: (f32, f32) }
+  SetMomentum      { target: Target, value: (f32, f32) }
+  SetResistance    { target: Target, value: (f32, f32) }
+  Spawn            { object: Box<GameObject>, location: Location }
+  Remove           { target: Target }
+  TransferMomentum { from: Target, to: Target, scale: f32 }
+  SetAnimation     { target: Target, animation_bytes: &'static [u8], fps: f32 }
+  Teleport         { target: Target, location: Location }
+  Show             { target: Target }
+  Hide             { target: Target }
+  Toggle           { target: Target }
+  Conditional      { condition: Condition, if_true: Box<Action>,
+                     if_false: Option<Box<Action>> }
+  Custom           { name: String }
+  SetVar           { name: String, value: Expr }
+  ModVar           { name: String, op: MathOp, operand: Expr }
+  Multi(Vec<Action>)
+  PlaySound        { path: String, options: SoundOptions }
+  SetGravity       { target: Target, value: f32 }
+  SetSize          { target: Target, value: (f32, f32) }
+  AddTag           { target: Target, tag: String }
+  RemoveTag        { target: Target, tag: String }
+  SetText          { target: Target, text: Text }
+  Expr(String)
+  SetRotation      { target: Target, value: f32 }
+  SetSlope         { target: Target, left_offset: f32, right_offset: f32,
+                     auto_rotate: bool }
+  AddRotation      { target: Target, value: f32 }
+  ApplyRotation    { target: Target, value: f32 }
+  SetSurfaceNormal { target: Target, nx: f32, ny: f32 }
+  SetCollisionMode { target: Target, mode: CollisionMode }
+  SetGlow          { target: Target, color: Color, width: f32 }
+  ClearGlow        { target: Target }
+  SetTint          { target: Target, color: Color }
+  ClearTint        { target: Target }
 
-Action helper constructors:                                       [NEW 2026-03-31]
+Action builder methods:
   Action::expr(s)
   Action::expr_checked(s) -> Result<Action, String>
-  Action::when(cond, if_true, if_false)
+  Action::when(cond, if_true, if_false: Option<Action>)
   Action::when_if(cond, if_true)
   Action::when_else(cond, if_true, if_false)
-  Action::multi(actions)
+  Action::multi(actions: Vec<Action>)
   Action::set_var(name, value)
-  Action::mod_var(name, op, operand)
+  Action::mod_var(name, op: MathOp, operand)
   Action::custom(name)
   Action::show(target) / hide(target) / toggle(target) / remove(target)
   Action::spawn(object, location) / teleport(target, location)
@@ -344,10 +390,11 @@ Action helper constructors:                                       [NEW 2026-03-3
   Action::transfer_momentum(from, to, scale)
   Action::set_size(target, width, height)
   Action::add_tag(target, tag) / remove_tag(target, tag)
-  Action::set_text(target, text)                  — Text payload
+  Action::set_text(target, text)
   Action::play_sound(path) / play_sound_with_options(path, options)
   Action::set_animation(target, animation_bytes, fps)
-  Action::set_rotation(target, value) / add_rotation(target, value)
+  Action::set_rotation(target, value)
+  Action::add_rotation(target, value)
   Action::apply_rotation(target, value)
   Action::set_slope(target, left, right, auto_rotate)
   Action::set_surface_normal(target, nx, ny)
@@ -356,190 +403,99 @@ Action helper constructors:                                       [NEW 2026-03-3
   Action::set_tint(target, color) / clear_tint(target)
 
 --------------------------------------------------------------------------------
-  MODULE: Collision / Highlight Types  (types.rs)                 [NEW 2026-03-31]
---------------------------------------------------------------------------------
-
-CollisionShape  (enum)
-  Rectangle
-  Circle { radius: f32 }
-
-CollisionShape::circle(radius: f32) -> CollisionShape
-CollisionShape::circle_auto() -> CollisionShape
-
-CollisionMode  (enum)
-  NonPlatform
-  Surface
-  Solid(CollisionShape)
-
-CollisionMode::non_platform() -> CollisionMode
-CollisionMode::solid() -> CollisionMode
-CollisionMode::solid_circle(radius: f32) -> CollisionMode
-
-GlowConfig  (struct)
-  Fields: color: Color, width: f32
-
-HighlightEffect  (struct)
-  Fields: tint: Option<Color>, glow: Option<GlowConfig>
-
---------------------------------------------------------------------------------
-  MODULE: Target / Location / Anchor  (types.rs)
---------------------------------------------------------------------------------
-
-Target  (enum, Debug, Clone)
-  Variants: ByName(String), ById(String), ByTag(String)
-  Target::name(s) / Target::id(s) / Target::tag(s)
-
-Anchor  (struct, Debug, Clone, Copy)
-  Fields: x: f32, y: f32  (normalised object space, 0=left/top, 1=right/bottom)
-
-Location  (enum, Debug, Clone)
-  Variants:
-    Position((f32, f32))
-    Between(Box<Target>, Box<Target>)
-    AtTarget(Box<Target>)
-    Relative { target: Box<Target>, offset: (f32, f32) }
-    OnTarget  { target: Box<Target>, anchor: Anchor, offset: (f32, f32) }
-
-  Location::at(x: f32, y: f32) -> Location
-    Shorthand for Location::Position((x, y)).
-
-  Location::at_target(target: Target) -> Location                 [NEW 2026-03-31]
-  Location::between(t1: Target, t2: Target) -> Location           [NEW 2026-03-31]
-  Location::relative_to(target: Target, offset: (f32, f32)) -> Location
-  Location::on_target(target: Target, anchor: Anchor, offset: (f32, f32)) -> Location
-
-  Location::resolve_position(store: &ObjectStore) -> (f32, f32)  (pub(crate))
-
---------------------------------------------------------------------------------
-  MODULE: Condition  (types.rs)
---------------------------------------------------------------------------------
-
-Condition  (enum, Clone, Debug)
-  Variants:
-    Always
-    KeyHeld(Key) / KeyNotHeld(Key)
-    Collision(Target) / NoCollision(Target)
-    And(Box<Condition>, Box<Condition>)
-    Or(Box<Condition>, Box<Condition>)
-    Not(Box<Condition>)
-    IsVisible(Target) / IsHidden(Target)
-    Compare(Expr, CompOp, Expr)                                   [NEW 2026-03-31]
-    VarExists(String)                                             [NEW 2026-03-31]
-    Grounded(Target)                                              [NEW 2026-03-31]
-    Expr(String)                                                  [NEW 2026-03-31]
-    HasTag(Target, String)                                        [NEW 2026-03-31]
-
-Condition::expr(s) -> Condition                                   [NEW 2026-03-31]
-Condition::expr_checked(s) -> Result<Condition, String>           [NEW 2026-03-31]
-
-ConditionOps (trait)                                              [NEW 2026-03-31]
-  condition.and(other)
-  condition.or(other)
-  condition.not()
-
---------------------------------------------------------------------------------
-  MODULE: GameEvent  (types.rs)
+  MODULE: GameEvent  (types/event.rs)
 --------------------------------------------------------------------------------
 
 GameEvent  (enum, Clone, Debug)
-  All variants carry an action: Action and target: Target.
+  All variants carry action: Action and target: Target except Custom.
 
-  Variants:
-    Tick             { action: Action, target: Target }
-    KeyPress         { key: Key, action: Action, target: Target }
-    KeyRelease       { key: Key, action: Action, target: Target }
-    KeyHold          { key: Key, action: Action, target: Target }
-    Collision        { action: Action, target: Target }
-    BoundaryCollision{ action: Action, target: Target }
-    MousePress       { action: Action, target: Target, button: Option<MouseButton> }
-    MouseRelease     { action: Action, target: Target, button: Option<MouseButton> }
-    MouseMove        { action: Action, target: Target }
-    MouseOver        { action: Action, target: Target }
-    MouseEnter       { action: Action, target: Target }
-    MouseLeave       { action: Action, target: Target }
-    MouseScroll      { action: Action, target: Target, axis: Option<ScrollAxis> }
-    Custom           { name: String, target: Target }
-      Note: Custom events do not carry an action; calling .action() on a Custom
-      event panics. Use register_custom_event instead.
+  Collision         { action: Action, target: Target }
+  BoundaryCollision { action: Action, target: Target }
+  KeyPress          { key: Key, action: Action, target: Target }
+  KeyRelease        { key: Key, action: Action, target: Target }
+  KeyHold           { key: Key, action: Action, target: Target }
+  Tick              { action: Action, target: Target }
+  Custom            { name: String, target: Target }
+    Note: Custom events have no action field. Calling .action() panics.
+    Use Canvas::register_custom_event instead.
+  MousePress        { action: Action, target: Target, button: Option<MouseButton> }
+  MouseRelease      { action: Action, target: Target, button: Option<MouseButton> }
+  MouseEnter        { action: Action, target: Target }
+  MouseLeave        { action: Action, target: Target }
+  MouseOver         { action: Action, target: Target }
+  MouseScroll       { action: Action, target: Target, axis: Option<ScrollAxis> }
+  MouseMove         { action: Action, target: Target }
 
   Predicate helpers (all return bool):
     .is_key_press() / .is_key_release() / .is_key_hold()
-    .is_tick()
-    .is_custom()
+    .is_tick() / .is_custom()
     .is_mouse_press() / .is_mouse_release()
     .is_mouse_enter() / .is_mouse_leave() / .is_mouse_over()
     .is_mouse_scroll() / .is_mouse_move()
 
   Accessors:
-    .key() -> Option<&Key>         — Some for KeyPress/KeyRelease/KeyHold, else None
-    .action() -> &Action           — panics on Custom variant
-    .custom_name() -> Option<&str> — Some for Custom variant, else None
-
-MouseButton  (enum, Clone, Copy, Debug, PartialEq, Eq, Hash)
-  Variants: Left, Right, Middle
-
-ScrollAxis  (enum, Clone, Copy, Debug, PartialEq, Eq)
-  Variants: Up, Down, Left, Right
+    .key() -> Option<&Key>         Some for KeyPress/KeyRelease/KeyHold, else None
+    .action() -> &Action           panics on Custom variant
+    .custom_name() -> Option<&str> Some for Custom variant, else None
 
 --------------------------------------------------------------------------------
   MODULE: GameObject / GameObjectBuilder  (object.rs)
 --------------------------------------------------------------------------------
 
-  GameObject::build(id: impl Into<String>) -> GameObjectBuilder
-    Entry point for the fluent builder.
+GameObject::build(id: impl Into<String>) -> GameObjectBuilder
+  Entry point for the fluent builder.
 
-  Builder methods (all return Self):
-    .position(x: f32, y: f32)
-    .size(w: f32, h: f32)
-    .tag(tag: impl Into<String>)     — may be called multiple times
-    .image(img: Image)
-    .gravity(g: f32)
-    .momentum(x: f32, y: f32)
-    .resistance(x: f32, y: f32)
-    .platform()
-    .floor()
-    .ceiling() / .wall_left() / .wall_right()                    [NEW 2026-03-31]
-    .surface(nx, ny)                                              [NEW 2026-03-31]
-    .rotation(degrees)                                            [NEW 2026-03-31]
-    .slope(left_offset, right_offset)                             [NEW 2026-03-31]
-    .slope_auto_rotation(left_offset, right_offset)               [NEW 2026-03-31]
-    .one_way()                                                    [NEW 2026-03-31]
-    .surface_velocity(vx)                                         [NEW 2026-03-31]
-    .rotation_resistance(resistance)                              [NEW 2026-03-31]
-    .solid() / .solid_circle(radius)                              [NEW 2026-03-31]
-    .collision_mode(mode: CollisionMode)                          [NEW 2026-03-31]
-    .highlight(effect) / .glow(config) / .tint(color)             [NEW 2026-03-31]
-    .layer(id: u32)
-
-  GameObjectBuilder::finish() -> GameObject
-    Finalises and returns the GameObject. No Context required.
-
-  GameObjectBuilder::build(ctx: &mut Context) -> GameObject
-    Alias for finish(). ctx is unused, reserved for future use.
+Builder methods (all return Self):
+  .position(x: f32, y: f32)
+  .size(w: f32, h: f32)
+  .tag(tag: impl Into<String>)   may be called multiple times
+  .image(img: Image)
+  .layer(id: u32)
+  .gravity(g: f32)
+  .momentum(x: f32, y: f32)
+  .resistance(x: f32, y: f32)
+  .platform()
+  .floor()
+  .ceiling() / .wall_left() / .wall_right()
+  .surface(nx: f32, ny: f32)
+  .rotation(degrees: f32)
+  .slope(left_offset: f32, right_offset: f32)
+  .slope_auto_rotation(left_offset: f32, right_offset: f32)
+  .one_way()
+  .surface_velocity(vx: f32)
+  .rotation_resistance(resistance: f32)
+  .solid() / .solid_circle(radius: f32)
+  .collision_mode(mode: CollisionMode)
+  .highlight(effect: HighlightEffect)
+  .glow(config: GlowConfig)
+  .tint(color: Color)
+  .finish() -> GameObject           no Context required
+  .build(ctx: &mut Context) -> GameObject   alias for finish()
 
 GameObject  (struct, Clone, Debug)
+
   Public fields:
-    id: String
-    position: (f32, f32)
-    size: (f32, f32)
-    momentum: (f32, f32)
-    resistance: (f32, f32)
-    gravity: f32
-    visible: bool
-    is_platform: bool
-    tags: Vec<String>
-    layer: Option<u32>
-    animated_sprite: Option<AnimatedSprite>
-    rotation: f32                                                 [NEW 2026-03-31]
-    slope: Option<(f32, f32)>                                     [NEW 2026-03-31]
-    one_way: bool                                                 [NEW 2026-03-31]
-    surface_velocity: Option<f32>                                 [NEW 2026-03-31]
-    rotation_momentum: f32                                        [NEW 2026-03-31]
-    rotation_resistance: f32                                      [NEW 2026-03-31]
-    surface_normal: (f32, f32)                                    [NEW 2026-03-31]
-    collision_mode: CollisionMode                                 [NEW 2026-03-31]
-    highlight: Option<HighlightEffect>                            [NEW 2026-03-31]
-    grounded: bool                                                [NEW 2026-03-31]
+    id:                  String
+    position:            (f32, f32)
+    size:                (f32, f32)
+    momentum:            (f32, f32)
+    resistance:          (f32, f32)
+    gravity:             f32
+    visible:             bool
+    is_platform:         bool
+    tags:                Vec<String>
+    layer:               Option<u32>
+    animated_sprite:     Option<AnimatedSprite>
+    rotation:            f32
+    slope:               Option<(f32, f32)>
+    one_way:             bool
+    surface_velocity:    Option<f32>
+    rotation_momentum:   f32
+    rotation_resistance: f32
+    surface_normal:      (f32, f32)
+    collision_mode:      CollisionMode
+    highlight:           Option<HighlightEffect>
+    grounded:            bool
 
   Methods:
     .set_gravity(gravity: f32)
@@ -547,17 +503,14 @@ GameObject  (struct, Clone, Debug)
     .set_image(image: Image)
     .set_text(spec: TextSpec)
     .set_drawable(drawable: Box<dyn Drawable>)
-    .set_glow(config: GlowConfig)                                 [NEW 2026-03-31]
-    .clear_glow()                                                 [NEW 2026-03-31]
-    .set_tint(color: Color)                                       [NEW 2026-03-31]
-    .clear_tint()                                                 [NEW 2026-03-31]
-    .set_highlight(effect: HighlightEffect)                       [NEW 2026-03-31]
-    .clear_highlight()                                            [NEW 2026-03-31]
-    .sync_rotation_normal()                                       [NEW 2026-03-31]
-    .slope_surface_y(world_x: f32) -> f32                         [NEW 2026-03-31]
-    .rotation_from_slope() -> f32                                 [NEW 2026-03-31]
-    .surface_normal_at(world_x: f32) -> (f32, f32)                [NEW 2026-03-31]
-    .slope_aabb() -> (f32, f32, f32, f32)                         [NEW 2026-03-31]
+    .set_glow(config: GlowConfig) / .clear_glow()
+    .set_tint(color: Color) / .clear_tint()
+    .set_highlight(effect: HighlightEffect) / .clear_highlight()
+    .sync_rotation_normal()
+    .slope_surface_y(world_x: f32) -> f32
+    .rotation_from_slope() -> f32
+    .surface_normal_at(world_x: f32) -> (f32, f32)
+    .slope_aabb() -> (f32, f32, f32, f32)
     .contains_point(pt: (f32, f32)) -> bool
     .check_boundary_collision(canvas_size: (f32, f32)) -> bool
     .get_anchor_position(anchor: Anchor) -> (f32, f32)
@@ -569,13 +522,18 @@ GameObject  (struct, Clone, Debug)
     .apply_gravity()
     .update_position()
     .apply_resistance()
+    .apply_rotation_momentum()
+    .hot_reload_image(path: &str)
+    .hot_reload_animation(path: &str)
 
 --------------------------------------------------------------------------------
   MODULE: AnimatedSprite  (sprite.rs)
 --------------------------------------------------------------------------------
 
-AnimatedSprite::new(gif_bytes: &[u8], size: (f32,f32), fps: f32) -> Result<AnimatedSprite, String>
-AnimatedSprite::from_frames(frames: Vec<RgbaImage>, size: (f32,f32), fps: f32) -> AnimatedSprite
+AnimatedSprite::new(gif_bytes: &[u8], size: (f32,f32), fps: f32)
+    -> Result<AnimatedSprite, String>
+AnimatedSprite::from_frames(frames: Vec<RgbaImage>, size: (f32,f32), fps: f32)
+    -> AnimatedSprite
 
 Playback:
   .update(delta_time: f32)
@@ -584,48 +542,56 @@ Playback:
   .reset()
   .frame_count() -> usize
   .set_frame(frame: usize)
+  .fps() -> f32
 
 Mirror:
-  .mirror()                           — toggle horizontal
+  .mirror()                        toggle horizontal mirror
   .set_mirrored(v: bool)
   .is_mirrored() -> bool
-  .mirror_vertical()                  — toggle vertical
+  .mirror_vertical()               toggle vertical mirror
   .set_mirrored_vertical(v: bool)
   .is_mirrored_vertical() -> bool
 
-Rotation (draw-time, not baked):
+Draw-time rotation (not baked into pixels):
   .set_rotation(options: RotationOptions)
   .rotate_by(options: RotationOptions)
   .clear_rotation()
   .rotation_degrees() -> f32
 
-Rotation (baked into pixels):
-  .rotate_90_cw()     — swaps width/height
-  .rotate_90_ccw()    — swaps width/height
+Baked rotation (modifies pixel data, swaps width/height):
+  .rotate_90_cw()
+  .rotate_90_ccw()
   .rotate_180()
 
 RotationOptions  (struct, Clone, Copy, Debug)
   Fields: degrees: f32, direction: RotationDirection
+
   RotationOptions::clockwise(degrees: f32) -> RotationOptions
   RotationOptions::counter_clockwise(degrees: f32) -> RotationOptions
-  RotationOptions::degrees(degrees: f32) -> RotationOptions   — shorthand for clockwise
+  RotationOptions::degrees(degrees: f32) -> RotationOptions  shorthand for clockwise
 
 RotationDirection  (enum, Clone, Copy, Debug, PartialEq)
-  Variants: Clockwise, CounterClockwise
+  Clockwise, CounterClockwise
 
 --------------------------------------------------------------------------------
   IMAGE UTILITIES  (sprite.rs)
 --------------------------------------------------------------------------------
 
 load_image(path: &str) -> Image
+  Registers path for automatic hot-reload.
+
 load_image_sized(path: &str, w: f32, h: f32) -> Image
+  Registers path for automatic hot-reload.
+
+load_animation(path: &str, size: (f32,f32), fps: f32) -> AnimatedSprite
+  Registers path for automatic hot-reload.
+
 flip_horizontal(img: Image) -> Image
 flip_vertical(img: Image) -> Image
 rotate_cw(img: Image) -> Image
 rotate_ccw(img: Image) -> Image
 rotate_180(img: Image) -> Image
 
-Specialized helpers:                                              [NEW 2026-03-31]
 solid_circle(size: f32, color: Color) -> Image
 planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image
 planet_grayscale(radius: u32, size: f32) -> Image
@@ -635,94 +601,66 @@ glow_ring(w: f32, h: f32, ring_width: f32, corner_radius: f32, color: Color) -> 
 tint_overlay(w: f32, h: f32, color: Color) -> Image
 
 --------------------------------------------------------------------------------
-  MODULE: Value / Expr / MathOp / CompOp  (value.rs)              [NEW 2026-03-31]
+  MODULE: Value / Expr / MathOp / CompOp  (value.rs)
 --------------------------------------------------------------------------------
 
-Value  (enum)
-  Variants:
-    I8, U8, I16, U16, I32, U32, I64, U64, F32, F64, Usize, Bool, Str
+Value  (enum, Debug, Clone)
+  Variants: I8, U8, I16, U16, I32, U32, I64, U64, F32, F64, Usize, Bool, Str
 
-Value::to_display_string() -> String
+  .to_display_string() -> String
+    F32/F64 formatted to 2 decimal places. All others use natural Display.
+    Bool: "true"/"false". Str: returns the inner string.
 
-MathOp  (enum)
-  Variants: Add, Sub, Mul, Div
+  From<T> impls for all primitive numeric types, bool, &str, String.
 
-CompOp  (enum)
-  Variants: Eq, Ne, Gt, Lt, Gte, Lte
+MathOp  (enum, Debug, Clone)
+  Add, Sub, Mul, Div
 
-Expr  (enum)
-  Variants:
-    Lit(Value)
-    Var(String)
-    Add(Box<Expr>, Box<Expr>)
-    Sub(Box<Expr>, Box<Expr>)
-    Mul(Box<Expr>, Box<Expr>)
-    Div(Box<Expr>, Box<Expr>)
-    Format { template: String, args: Vec<Expr> }
+CompOp  (enum, Debug, Clone)
+  Eq, Ne, Gt, Lt, Gte, Lte
 
-Expr constructors:
-  Expr::var(name)
-  Expr::i8 / u8 / i16 / u16 / i32 / u32 / i64 / u64 / f32 / f64 / usize / str / bool
-  Expr::add(a, b) / sub(a, b) / mul(a, b) / div(a, b)
+Expr  (enum, Debug, Clone)
+  Lit(Value)
+  Var(String)                 looked up in vars map at eval time
+  Add(Box<Expr>, Box<Expr>)
+  Sub(Box<Expr>, Box<Expr>)
+  Mul(Box<Expr>, Box<Expr>)
+  Div(Box<Expr>, Box<Expr>)
+  Format { template: String, args: Vec<Expr> }
+    Replaces {0}, {1}, ... in template with display strings of each arg.
 
-Expr comparator helpers (produce Condition::Compare):
-  expr.eq(rhs) / expr.ne(rhs)
-  expr.gt(rhs) / expr.lt(rhs)
-  expr.gte(rhs) / expr.lte(rhs)
+  Constructors:
+    Expr::var(name) / Expr::str(s) / Expr::bool(b)
+    Expr::u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/usize(n)
+    Expr::add(a, b) / sub(a, b) / mul(a, b) / div(a, b)
+
+  Comparator helpers (produce Condition::Compare):
+    expr.eq(rhs) / expr.ne(rhs)
+    expr.gt(rhs) / expr.lt(rhs)
+    expr.gte(rhs) / expr.lte(rhs)
+
+  From<T> impls mirror Value.
 
 resolve_expr(expr: &Expr, vars: &HashMap<String, Value>) -> Option<Value>
+  Evaluates the expression tree. Returns None on missing Var or type mismatch.
+
 apply_op(left: &Value, right: &Value, op: &MathOp) -> Option<Value>
+  Returns None on type mismatch. Integer division by zero returns 0.
+  Float division by 0.0 returns 0.0. String + String concatenates.
+
 compare_operands(left: &Value, right: &Value, op: &CompOp) -> Option<bool>
+  Returns None on type mismatch. Bool only supports Eq and Ne.
 
 --------------------------------------------------------------------------------
-  MODULE: Expression Parser  (expr.rs)                            [NEW 2026-03-31]
+  MODULE: Expression Parser  (expr.rs)
 --------------------------------------------------------------------------------
 
 parse_condition(source: &str) -> Result<Condition, String>
 parse_action(source: &str) -> Result<Vec<Action>, String>
 
---------------------------------------------------------------------------------
-  MODULE: Lerp  (lerp.rs)
---------------------------------------------------------------------------------
-
-Lerp  (struct, Debug, Clone, Copy)
-  A value that smoothly chases a target via lerp each tick.
-  Common use: scroll position, camera offset, any animated float.
-
-  Fields:
-    value:  f32  — Current animated value. Read this each frame.
-    target: f32  — Where value is heading.
-
-Lerp::new(speed: f32) -> Lerp
-  Unbounded lerp with the given speed factor (0 < speed ≤ 1).
-  Typical values: 0.10 (slow, camera-like), 0.18 (scroll), 0.25 (snappy).
-
-Lerp::bounded(speed: f32, min: f32, max: f32) -> Lerp
-  Lerp clamped to [min, max]. set() and nudge() clamp automatically.
-  Use this for scroll positions where the range is known.
-
-Lerp::tick(&mut self) -> bool
-  Advance by one frame. Returns true while still animating, false once
-  value has reached target (within 0.5 px). Call this every frame and
-  trigger a redraw while it returns true.
-
-Lerp::set(&mut self, target: f32)
-  Set a new target, clamped to bounds.
-
-Lerp::nudge(&mut self, delta: f32)
-  Offset the target by delta, staying within bounds.
-  Convenience for scroll: lerp.nudge(delta.1 * SCROLL_STEP).
-
-Lerp::set_bounds(&mut self, min: f32, max: f32)
-  Update the allowed range and re-clamp the current target.
-  Call when content length changes (e.g. lines added/removed).
-
-Lerp::snap(&mut self)
-  Jump value to target instantly — no animation. Use after a file load
-  or when the user snaps to cursor.
-
-Lerp::snap_to(&mut self, v: f32)
-  Move both value and target to v (clamped). No animation.
+Syntax supports: integers, floats, booleans, strings, variable identifiers,
++/-/*//, ==, !=, <, <=, >, >=, &&, ||, !, parentheses, and assignment
+operators (=, +=, -=, *=, /=) for action statements.
 
 --------------------------------------------------------------------------------
   MODULE: Scene / SceneManager  (scene.rs)
@@ -731,14 +669,25 @@ Lerp::snap_to(&mut self, v: f32)
 Scene::new(name: impl Into<String>) -> Scene
 Scene::with_object(name: impl Into<String>, obj: GameObject) -> Scene
 Scene::with_event(event: GameEvent, target: Target) -> Scene
-Scene::on_enter<F>(f: F) -> Scene
-Scene::on_exit<F>(f: F) -> Scene
+Scene::on_enter<F: FnMut(&mut Canvas) + Clone + 'static>(f) -> Scene
+Scene::on_exit<F: FnMut(&mut Canvas) + Clone + 'static>(f) -> Scene
 
 SceneManager::new() -> SceneManager
 SceneManager::add_scene(scene: Scene)
-SceneManager::load_scene(name: &str)                              [NEW 2026-03-31]
 SceneManager::active_scene() -> Option<&str>
 SceneManager::has_scene(name: &str) -> bool
+
+Canvas methods (defined in scene.rs as impl Canvas):
+  Canvas::add_scene(scene: Scene)
+  Canvas::load_scene(name: &str)
+  Canvas::active_scene() -> Option<&str>
+  Canvas::is_scene(name: &str) -> bool
+
+load_scene behaviour:
+  1. Fires on_exit for the current scene.
+  2. Removes all objects belonging to the current scene.
+  3. Adds all objects and events for the new scene.
+  4. Fires on_enter for the new scene.
 
 --------------------------------------------------------------------------------
   MODULE: Camera  (camera.rs)
@@ -748,209 +697,27 @@ Camera::new(world_size: (f32,f32), viewport_size: (f32,f32)) -> Camera
   lerp_speed defaults to 0.10.
 
 Camera::follow(target: Option<Target>)
-  Set or clear the object to follow each tick.
+  Set or clear the object the camera follows each tick.
 
 Camera::center_on(wx: f32, wy: f32)
-  Instantly reposition the camera so (wx, wy) is centred in the viewport,
+  Instantly reposition camera so (wx, wy) is centred in the viewport,
   clamped to world bounds.
 
-Camera::lerp_toward(wx: f32, wy: f32)  (pub(crate))
+Camera::lerp_toward(wx: f32, wy: f32)   pub(crate)
   Smooth step toward the given world position each tick.
 
-  Fields:
-    position: (f32, f32)    — current camera offset applied to all objects
-    world_size: (f32, f32)
-    lerp_speed: f32         — default 0.10
+Public fields:
+  position:    (f32, f32)   current camera offset applied to all objects
+  world_size:  (f32, f32)
+  lerp_speed:  f32          default 0.10
 
 --------------------------------------------------------------------------------
-  MODULE: Entropy  (entropy.rs)
---------------------------------------------------------------------------------
-
-Entropy  (struct, Debug, Clone)
-  Accessible on Canvas via canvas.entropy.
-
-Entropy::new() -> Entropy           — seeds from system time
-Entropy::default() -> Entropy       — alias for new()
-Entropy::from_seed(seed: u64) -> Entropy
-Entropy::from_time() -> Entropy
-
-Entropy::seed(&mut self, seed: u64)
-Entropy::reseed(&mut self)          — re-seeds from system time
-
-Entropy::next(&mut self) -> f32                          — [0.0, 1.0)
-Entropy::range(&mut self, min: f32, max: f32) -> f32     — [min, max)
-Entropy::int(&mut self, min: i32, max: i32) -> i32       — [min, max] inclusive
-Entropy::chance(&mut self, probability: f32) -> bool
-Entropy::pick<'a, T>(&mut self, items: &'a [T]) -> Option<&'a T>
-Entropy::position_in(&mut self, x: f32, y: f32, w: f32, h: f32) -> (f32, f32)
-
---------------------------------------------------------------------------------
-  MODULE: Shared<T>  (file_watcher.rs)
---------------------------------------------------------------------------------
-
-Shared<T>  (struct, Clone, Debug where T: Debug)
-  A cheaply-cloneable reference-counted shared value built on Rc<RefCell<T>>.
-  Also tracks whether the inner value was updated since the last changed() call,
-  so on_update callbacks can react to hot-reloaded settings without extra wiring.
-  All clones share the same underlying value and changed flag.
-
-Shared::new(val: T) -> Shared<T>
-  Wrap val in a new Shared.
-
-.get(&self) -> Ref<'_, T>
-  Immutable borrow of the inner value.
-
-.get_mut(&self) -> RefMut<'_, T>
-  Mutable borrow of the inner value.
-
-.update<F: FnOnce(&mut T)>(&self, f: F)
-  Apply a mutation closure without holding a borrow guard across statements.
-
-.set(&self, val: T)
-  Replace the inner value and set the changed flag to true.
-
-.changed(&self) -> bool
-  Returns true if the value was updated since the last call to changed(),
-  then resets the flag to false. Intended for use inside on_update.
-  Example:
-    if settings.changed() {
-        rebuild_chrome(cv, &settings.get(), vw, vh);
-    }
-
---------------------------------------------------------------------------------
-  MODULE: SourceSettings  (file_watcher.rs)
---------------------------------------------------------------------------------
-
-SourceSettings  (struct, Debug, Clone, Default)
-  Parses a Rust source file into a flat key→value map by scanning every line
-  for the pattern `field_name: <value>,` (trimmed). Supports string literals,
-  f32, and usize. Comments (// and /*) are skipped. Use with watch_file or
-  watch_source to live-reload settings defined inline in source code.
-
-SourceSettings::parse(src: &str) -> SourceSettings
-  Parse the given source text and populate the maps.
-
-.str(&self, key: &str) -> Option<String>
-.f32(&self, key: &str) -> Option<f32>
-.usize(&self, key: &str) -> Option<usize>
-
-  Example:
-    cv.watch_file("src/app.rs", move |_cv, bytes| {
-        let Ok(src) = std::str::from_utf8(bytes) else { return };
-        let p = SourceSettings::parse(src);
-        let bg        = p.str("bg").unwrap_or("#1e1e2e".into());
-        let font_size = p.f32("font_size").unwrap_or(16.0);
-        let tab_size  = p.usize("tab_size").unwrap_or(4);
-    });
-
---------------------------------------------------------------------------------
-  TRAIT: FromSource  (file_watcher.rs)
---------------------------------------------------------------------------------
-
-pub trait FromSource: Sized {
-    fn from_source(p: &SourceSettings) -> Self;
-}
-
-  Implement on a settings struct to enable Canvas::watch_source.
-  from_source receives a parsed SourceSettings and must return a new Self.
-  Example:
-    impl FromSource for MySettings {
-        fn from_source(p: &SourceSettings) -> Self {
-            Self {
-                font_size: p.f32("font_size").unwrap_or(16.0),
-                tab_size:  p.usize("tab_size").unwrap_or(4),
-            }
-        }
-    }
-
---------------------------------------------------------------------------------
-  MODULE: Text Utilities  (text.rs)
---------------------------------------------------------------------------------
-
-SpanSpec  (struct, Clone, Debug)
-  Fields: text: String, font_size: f32, line_height: Option<f32>,
-          font: Font, color: Color, letter_spacing: f32
-
-TextSpec  (struct, Clone, Debug)
-  Fields: spans: Vec<SpanSpec>, align: Align
-
-TextSpec::new(spans: Vec<SpanSpec>, align: Align) -> TextSpec
-TextSpec::build(&self, scale: f32) -> Text
-  Scales all size and spacing fields by scale and returns a prism Text ready
-  for rendering. Results are cached; rebuilds only when span text, color,
-  or scale changes. Called automatically each tick by update_text_scale.
-
-make_text(text, font_size, font, color) -> TextSpec
-  Centred single span, line_height = font_size * 1.35.
-
-make_text_aligned(text, font_size, font, color, align) -> TextSpec
-  Single span with explicit alignment.
-
-make_text_multi(spans: Vec<(String, f32, Font, Color)>, align: Align) -> TextSpec
-  Multi-span text with a shared alignment.
-
-[UPDATED 2026-03-31] Action::set_text(...) uses Text payload.
-TextSpec remains available through GameObject::set_text(spec) and helper builders.
-
---------------------------------------------------------------------------------
-  MODULE: Value / Expr  (value.rs)
---------------------------------------------------------------------------------
-
-Value  (enum, Debug, Clone)
-  A dynamically-typed value used in expression trees and game state.
-  Variants: I8, U8, I16, U16, I32, U32, I64, U64, F32, F64, Usize, Bool, Str
-
-  .to_display_string(&self) -> String
-    Converts to a human-readable string. F32 and F64 are formatted to 2
-    decimal places; all integer types use their natural Display; Bool uses
-    "true"/"false"; Str returns the inner string.
-
-  From<T> impls for all primitive types and &str / String.
-
-MathOp  (enum, Debug, Clone)
-  Variants: Add, Sub, Mul, Div
-
-CompOp  (enum, Debug, Clone)
-  Variants: Eq, Ne, Gt, Lt, Gte, Lte
-
-Expr  (enum, Debug, Clone)
-  An expression tree that can be evaluated against a variable map.
-  Variants:
-    Lit(Value)
-    Var(String)                          — looked up in vars at eval time
-    Add(Box<Expr>, Box<Expr>)
-    Sub(Box<Expr>, Box<Expr>)
-    Mul(Box<Expr>, Box<Expr>)
-    Div(Box<Expr>, Box<Expr>)
-    Format { template: String, args: Vec<Expr> }
-      Replaces {0}, {1}, … in template with the display strings of each arg.
-
-  Constructor helpers:
-    Expr::var(name) / Expr::str(s)
-    Expr::u8 / i8 / u16 / i16 / u32 / i32 / u64 / i64 / f32 / f64 / usize
-    Expr::add(a, b) / sub(a, b) / mul(a, b) / div(a, b)
-
-  From<T> impls mirror Value: all primitive types and &str / String.
-
-resolve_expr(expr: &Expr, vars: &HashMap<String, Value>) -> Option<Value>
-  Evaluate an expression tree. Returns None if a Var is missing from the
-  map or if operand types are mismatched.
-
-apply_op(left: &Value, right: &Value, op: &MathOp) -> Option<Value>
-  Apply a MathOp to two Values of the same type. Returns None on type
-  mismatch. Integer division by zero returns 0; float division by 0.0
-  returns 0.0. String + String concatenates; other string ops return None.
-
-compare_operands(left: &Value, right: &Value, op: &CompOp) -> Option<bool>
-  Compare two Values with a CompOp. Returns None on type mismatch.
-  Bool only supports Eq and Ne (other ops return false).
-
---------------------------------------------------------------------------------
-  MODULE: SoundOptions  (sound.rs)
+  MODULE: SoundOptions / SoundHandle  (sound.rs)
 --------------------------------------------------------------------------------
 
 SoundOptions::new() / SoundOptions::default()
-  Defaults: volume=1.0, looping=false, pitch=1.0, delay=0, fade_in=0, pan=0.
+  Defaults: volume=1.0, looping=false, pitch=1.0, delay=0.0,
+            fade_in=0.0, pan=0.0.
 
 Builder methods (all return Self):
   .volume(v: f32)
@@ -958,11 +725,7 @@ Builder methods (all return Self):
   .pitch(p: f32)
   .delay(s: f32)
   .fade_in(s: f32)
-  .pan(p: f32)           — clamps to [-1.0, 1.0]
-
---------------------------------------------------------------------------------
-  MODULE: SoundHandle  (sound.rs)
---------------------------------------------------------------------------------
+  .pan(p: f32)   clamped to [-1.0, 1.0]
 
 SoundHandle  (Clone)
 
@@ -979,7 +742,7 @@ SoundHandle  (Clone)
   .volume() -> f32
   .speed() -> f32
 
-spawn_sound(file_path: &str, options: SoundOptions) -> SoundHandle  (pub(crate))
+spawn_sound(file_path: &str, options: SoundOptions) -> SoundHandle   pub(crate)
 
 --------------------------------------------------------------------------------
   MODULE: ObjectStore  (store.rs)
@@ -987,19 +750,19 @@ spawn_sound(file_path: &str, options: SoundOptions) -> SoundHandle  (pub(crate))
 
 ObjectStore::new() -> ObjectStore
 
-ObjectStore::add(name: String, obj: GameObject)
-ObjectStore::remove(name: &str) -> bool
-ObjectStore::get_indices(target: &Target) -> Vec<usize>
-ObjectStore::get_names(target: &Target) -> Vec<String>
-ObjectStore::apply_to_targets<F: FnMut(&mut GameObject)>(target: &Target, f: F)
+  .add(name: String, obj: GameObject)
+  .remove(name: &str) -> bool
+  .get_indices(target: &Target) -> Vec<usize>
+  .get_names(target: &Target) -> Vec<String>
+  .apply_to_targets<F: FnMut(&mut GameObject)>(target: &Target, f: F)
 
-  Fields (pub):
-    objects:        Vec<GameObject>
-    names:          Vec<String>
-    name_to_index:  HashMap<String, usize>
-    id_to_index:    HashMap<String, usize>
-    events:         Vec<Vec<GameEvent>>
-    tag_to_indices: HashMap<String, Vec<usize>>
+Public fields:
+  objects:        Vec<GameObject>
+  names:          Vec<String>
+  name_to_index:  HashMap<String, usize>
+  id_to_index:    HashMap<String, usize>
+  events:         Vec<Vec<GameEvent>>
+  tag_to_indices: HashMap<String, Vec<usize>>
 
 --------------------------------------------------------------------------------
   MODULE: InputState / MouseState / CallbackStore  (input.rs)
@@ -1007,22 +770,29 @@ ObjectStore::apply_to_targets<F: FnMut(&mut GameObject)>(target: &Target, f: F)
 
 InputState::new() -> InputState
   Fields:
-    held_keys: HashSet<Key>
-    press_callbacks: Vec<Box<dyn Callback>>
+    held_keys:         HashSet<Key>
+    press_callbacks:   Vec<Box<dyn Callback>>
     release_callbacks: Vec<Box<dyn Callback>>
 
 MouseState::new() -> MouseState
   Fields:
-    position: Option<(f32, f32)>
-    hovered_indices: HashSet<usize>
-    press_callbacks, release_callbacks: Vec<Box<dyn MouseCallback>>
-    move_callbacks: Vec<Box<dyn MouseMoveCallback>>
-    scroll_callbacks: Vec<Box<dyn MouseScrollCallback>>
+    position:          Option<(f32, f32)>
+    hovered_indices:   HashSet<usize>
+    press_callbacks:   Vec<Box<dyn MouseCallback>>
+    release_callbacks: Vec<Box<dyn MouseCallback>>
+    move_callbacks:    Vec<Box<dyn MouseMoveCallback>>
+    scroll_callbacks:  Vec<Box<dyn MouseScrollCallback>>
 
 CallbackStore::new() -> CallbackStore
   Fields:
     tick:   Vec<Box<dyn EventCallback>>
     custom: HashMap<String, Box<dyn EventCallback>>
+
+Canvas methods (defined in input.rs as impl Canvas):
+  Canvas::on_key_press / on_key_release
+  Canvas::on_mouse_press / on_mouse_release / on_mouse_move / on_mouse_scroll
+  Canvas::mouse_position() -> Option<(f32, f32)>
+  Canvas::is_key_held(key: &Key) -> bool
 
 Internal (pub(crate)):
   Canvas::handle_keyboard_event(evt: &KeyboardEvent)
@@ -1031,21 +801,156 @@ Internal (pub(crate)):
   Canvas::handle_mouse_event(evt: MouseEvent)
   Canvas::objects_under_cursor(vpos: (f32,f32)) -> Vec<usize>
   Canvas::update_hover_state(vpos: (f32,f32))
-  Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)
 
 --------------------------------------------------------------------------------
-  INTERNAL / FRAME-LOOP METHODS  (called automatically each tick)
+  MODULE: Shared<T>  (file_watcher.rs)
 --------------------------------------------------------------------------------
 
-Canvas::update_objects(delta_time: f32)         (pub(crate))
-Canvas::apply_camera_transform()                (pub(crate))
-Canvas::handle_collisions()                     (pub(crate))
-Canvas::handle_infinite_scroll()                (pub(crate))
-Canvas::process_hot_reloads(delta_time: f32)    (pub(crate))
-Canvas::check_collision(o1, o2) -> bool         (pub(crate))
-Canvas::evaluate_condition(condition) -> bool   (pub(crate))
-Canvas::trigger_collision_events(idx: usize)    (pub(crate))
-Canvas::trigger_boundary_collision_events(idx)  (pub(crate))
+Shared<T>  (struct, Clone, Debug where T: Debug)
+  Reference-counted shared value built on Rc<RefCell<T>>.
+  All clones share the same underlying value and changed flag.
+  Thread-local (not Send/Sync).
+
+Shared::new(val: T) -> Shared<T>
+
+  .get() -> Ref<'_, T>
+  .get_mut() -> RefMut<'_, T>
+  .update<F: FnOnce(&mut T)>(f)
+  .set(val: T)               replaces inner value and sets changed flag
+  .changed() -> bool         true if set() was called since last check;
+                             resets the flag to false
+
+--------------------------------------------------------------------------------
+  MODULE: SourceSettings  (file_watcher.rs)
+--------------------------------------------------------------------------------
+
+SourceSettings  (struct, Debug, Clone, Default)
+  Parses a Rust source file into a flat key->value map by scanning lines
+  for the pattern `field_name: <value>,`. Supports string literals, f32,
+  and usize. Lines starting with // or /* are skipped.
+
+SourceSettings::parse(src: &str) -> SourceSettings
+
+  .str(key: &str)   -> Option<String>
+  .f32(key: &str)   -> Option<f32>
+  .usize(key: &str) -> Option<usize>
+
+--------------------------------------------------------------------------------
+  TRAIT: FromSource  (file_watcher.rs)
+--------------------------------------------------------------------------------
+
+pub trait FromSource: Sized {
+    fn from_source(p: &SourceSettings) -> Self;
+}
+
+  Implement on a settings struct to enable Canvas::watch_source.
+  Receives a parsed SourceSettings and must return a new Self.
+  Example:
+    impl FromSource for MySettings {
+        fn from_source(p: &SourceSettings) -> Self {
+            Self {
+                font_size: p.f32("font_size").unwrap_or(16.0),
+                tab_size:  p.usize("tab_size").unwrap_or(4),
+            }
+        }
+    }
+
+--------------------------------------------------------------------------------
+  MODULE: TextSpec / SpanSpec  (text.rs)
+--------------------------------------------------------------------------------
+
+SpanSpec  (struct, Clone, Debug, PartialEq)
+  Fields:
+    text:           String
+    font_size:      f32
+    line_height:    Option<f32>
+    font:           Font
+    color:          Color
+    letter_spacing: f32
+
+TextSpec  (struct, Clone, Debug)
+  Fields: spans: Vec<SpanSpec>, align: Align
+
+TextSpec::new(spans: Vec<SpanSpec>, align: Align) -> TextSpec
+
+TextSpec::build(&self, scale: f32) -> Text
+  Scales all size/spacing fields by scale and returns a prism Text ready
+  for rendering. Results are cached; rebuilds only when content or scale
+  changes. Called automatically each tick by update_text_scale.
+
+TextSpec::mark_dirty(&self)
+  Force a rebuild on the next build() call.
+
+TextSpec::take_dirty(&self) -> bool
+  Returns true (and clears the flag) if a rebuild is needed.
+
+make_text(text, font_size, font, color) -> TextSpec
+  Centred single span. line_height = font_size * 1.35.
+
+make_text_aligned(text, font_size, font, color, align) -> TextSpec
+  Single span with explicit alignment.
+
+make_text_multi(spans: Vec<(String, f32, Font, Color)>, align) -> TextSpec
+  Multi-span text with shared alignment.
+
+--------------------------------------------------------------------------------
+  MODULE: Lerp  (lerp.rs)
+--------------------------------------------------------------------------------
+
+Lerp  (struct, Debug, Clone, Copy)
+  A float value that smoothly chases a target each tick.
+
+Lerp::new(speed: f32) -> Lerp
+  Unbounded. Typical speeds: 0.10 (camera), 0.18 (scroll), 0.25 (snappy).
+
+Lerp::bounded(speed: f32, min: f32, max: f32) -> Lerp
+  Clamped to [min, max]. set() and nudge() clamp automatically.
+
+  Public fields:
+    value:  f32   current animated value — read this each frame
+    target: f32   destination value
+
+  .tick() -> bool
+    Advance one frame. Returns true while still animating, false once
+    value has reached target (within 0.5 units).
+
+  .set(target: f32)
+    Set a new target, clamped to bounds.
+
+  .nudge(delta: f32)
+    Offset the target by delta, staying within bounds.
+
+  .set_bounds(min: f32, max: f32)
+    Update the allowed range and re-clamp current target.
+
+  .snap()
+    Jump value to target instantly with no animation.
+
+  .snap_to(v: f32)
+    Move both value and target to v (clamped). No animation.
+
+--------------------------------------------------------------------------------
+  MODULE: Entropy  (entropy.rs)
+--------------------------------------------------------------------------------
+
+Entropy  (struct, Debug, Clone)
+  Deterministic pseudo-random number generator. Accessible on Canvas
+  directly via canvas.entropy.
+
+Entropy::new() -> Entropy           seeded from system time
+Entropy::default() -> Entropy       alias for new()
+Entropy::from_seed(seed: u64) -> Entropy
+Entropy::from_time() -> Entropy
+
+  .seed(seed: u64)
+  .reseed()                         re-seeds from system time
+
+  .next() -> f32                    [0.0, 1.0)
+  .range(min: f32, max: f32) -> f32 [min, max)
+  .int(min: i32, max: i32) -> i32   [min, max] inclusive
+  .chance(probability: f32) -> bool
+  .pick<'a, T>(items: &'a [T]) -> Option<&'a T>
+  .position_in(x: f32, y: f32, w: f32, h: f32) -> (f32, f32)
 
 ================================================================================
   END OF API REFERENCE

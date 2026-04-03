@@ -1,10 +1,9 @@
 use prism::event::OnEvent;
-use prism::drawable::{Drawable, Component, SizedTree};
+use prism::drawable::{Drawable, Component};
 use prism::Context;
-use prism::layout::{Area, SizeRequest};
 use prism::canvas::{Image, ShapeType, Color};
 use crate::text::TextSpec;
-use crate::sprite::AnimatedSprite;
+use crate::sprite::{AnimatedSprite, reload_image_raw, LAST_ASSET_PATH};
 use crate::types::{CollisionMode, Anchor, GlowConfig, HighlightEffect};
 use std::cell::Cell;
 
@@ -41,15 +40,6 @@ pub struct GameObject {
     pub(crate) animation_path:  Option<String>,
     pub(crate) image_mtime:     Option<std::time::SystemTime>,
     pub(crate) animation_mtime: Option<std::time::SystemTime>,
-    pub size:         (f32, f32),
-    pub position:     (f32, f32),
-    pub momentum:     (f32, f32),
-    pub resistance:   (f32, f32),
-    pub gravity:      f32,
-    pub scaled_size:  Cell<(f32, f32)>,
-    pub is_platform:  bool,
-    pub visible:      bool,
-    pub layer:        Option<u32>,
     pub rotation:            f32,
     pub slope:               Option<(f32, f32)>,
     pub one_way:             bool,
@@ -58,12 +48,10 @@ pub struct GameObject {
     pub rotation_resistance: f32,
     pub surface_normal:      (f32, f32),
     pub collision_mode:      CollisionMode,
-    pub highlight:    Option<HighlightEffect>,
-    glow_drawable: Option<Box<dyn Drawable>>,
-    tint_drawable: Option<Box<dyn Drawable>>,
+    pub highlight:           Option<HighlightEffect>,
+    glow_drawable:           Option<Box<dyn Drawable>>,
+    tint_drawable:           Option<Box<dyn Drawable>>,
     pub grounded:            bool,
-    text_spec:        Option<TextSpec>,
-    last_text_scale:  Cell<f32>, 
 }
 
 impl OnEvent for GameObject {}
@@ -559,9 +547,12 @@ impl GameObject {
                     self.animation_mtime   = Some(mtime);
                     println!("[hot-reload] animation reloaded: {path}");
                 }
-                Err(e) => eprintln!("[hot-reload] failed to decode animation '{path}': {e}"),
+                Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
             },
-            Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
+            Err(e) => eprintln!("[hot-reload] failed to open '{path}': {e}"),
+        }
+    }
+
     pub fn apply_rotation_momentum(&mut self) {
         if self.rotation_momentum == 0.0 { return; }
         self.rotation += self.rotation_momentum;
@@ -703,7 +694,7 @@ impl GameObjectBuilder {
         self
     }
 
-    pub fn floor(mut self) -> Self {
+    pub fn floor(self) -> Self {
         self.platform()
     }
 
