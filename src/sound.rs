@@ -87,7 +87,6 @@ impl SoundHandle {
     }
 
     pub fn fade_out(&self, duration_secs: f32) {
-        // Stop looping immediately so no new clips get appended while fading
         self.stopped.store(true, Ordering::Relaxed);
 
         let sink = Arc::clone(&self.sink);

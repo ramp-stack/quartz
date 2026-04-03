@@ -8,10 +8,6 @@ pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
 
 
-// ---------------------------------------------------------------------------
-// Modules
-// ---------------------------------------------------------------------------
-
 pub mod value;
 pub mod entropy;
 pub mod lerp;
@@ -26,10 +22,8 @@ pub mod camera;
 pub mod store;
 pub mod input;
 pub mod canvas;
+pub(crate) mod file_watcher;
 
-// ---------------------------------------------------------------------------
-// Re-exports
-// ---------------------------------------------------------------------------
 
 pub use types::{
     Action, Condition, GameEvent,
@@ -39,7 +33,7 @@ pub use types::{
 pub use object::{GameObject, GameObjectBuilder};
 pub use sprite::{
     AnimatedSprite, RotationOptions, RotationDirection,
-    load_image, load_image_sized,
+    load_image, load_image_sized, load_animation,
     flip_horizontal, flip_vertical,
     rotate_cw, rotate_ccw, rotate_180,
 };
@@ -51,7 +45,8 @@ pub use sound::{SoundOptions, SoundHandle};
 pub use entropy::Entropy;
 pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
 pub use lerp::Lerp;
- 
+pub use file_watcher::{Shared, SourceSettings, FromSource};
+
 pub use value::{
     Expr,
     Value,
@@ -61,7 +56,7 @@ pub use value::{
     apply_op,
     compare_operands,
 };
- 
+
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
@@ -136,14 +131,18 @@ impl Layout for CanvasLayout {
 
 #[derive(Clone)]
 pub struct Canvas {
-    pub(crate) layout:        CanvasLayout,
-    pub(crate) store:         ObjectStore,
-    pub(crate) input:         InputState,
-    pub        mouse:         MouseState,
-    pub(crate) callbacks:     CallbackStore,
-    pub(crate) scene_manager: SceneManager,
-    pub(crate) active_camera: Option<Camera>,
-    pub        entropy:       Entropy,
+    pub(crate) layout:           CanvasLayout,
+    pub(crate) store:            ObjectStore,
+    pub(crate) input:            InputState,
+    pub        mouse:            MouseState,
+    pub(crate) callbacks:        CallbackStore,
+    pub(crate) scene_manager:    SceneManager,
+    pub(crate) active_camera:    Option<Camera>,
+    pub        entropy:          Entropy,
+    /// Accumulates delta time; assets and files are polled every 0.5 s.
+    pub(crate) hot_reload_timer: f32,
+    /// General file watchers registered via `watch_file`.
+    pub(crate) file_watchers:    Vec<file_watcher::FileWatcher>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -188,7 +187,6 @@ impl OnEvent for Canvas {
         if let Some(_tick) = event.downcast_ref::<TickEvent>() {
             const DELTA_TIME: f32 = 0.016;
 
-            // User tick callbacks
             let mut tick_cbs = std::mem::take(&mut self.callbacks.tick);
             tick_cbs.iter_mut().for_each(|cb| cb(self));
             self.callbacks.tick = tick_cbs;
@@ -196,13 +194,11 @@ impl OnEvent for Canvas {
             self.process_held_key_events();
             self.process_all_tick_events();
 
-            // MouseOver events
             if let Some(pos) = self.mouse.position {
                 let vpos = self.screen_to_virtual(pos);
                 self.process_mouse_over_events(vpos);
             }
 
-            // Custom event handlers attached to objects
             let custom_names: Vec<String> = self.store.events.iter()
                 .flatten()
                 .filter_map(|e| {
@@ -221,6 +217,7 @@ impl OnEvent for Canvas {
                 }
             }
 
+            self.process_hot_reloads(DELTA_TIME);
             self.update_objects(DELTA_TIME);
             self.handle_collisions();
         }

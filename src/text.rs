@@ -1,8 +1,9 @@
 use prism::canvas::{Text, Span, Align, Font, Color};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::cell::{Cell, RefCell};
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SpanSpec {
     pub text:           String,
     pub font_size:      f32,
@@ -12,44 +13,62 @@ pub struct SpanSpec {
     pub letter_spacing: f32,
 }
 
-#[derive(Clone, Debug)]
-struct CacheEntry {
-    span_keys: Vec<(String, Color)>,
-    scale:     f32,
-    text:      Text,
+#[derive(Debug, Clone)]
+struct TextCache {
+    text:         Text,
+    scale:        f32,
+    content_hash: u64,
 }
 
 #[derive(Clone, Debug)]
 pub struct TextSpec {
     pub spans: Vec<SpanSpec>,
     pub align: Align,
-    cache: Arc<Mutex<Option<CacheEntry>>>,
+    cache:     RefCell<Option<TextCache>>,
+    dirty:     Cell<bool>,
+    old: Vec<SpanSpec>,
+    old_text: Option<Text>,
 }
 
 impl TextSpec {
     pub fn new(spans: Vec<SpanSpec>, align: Align) -> Self {
-        Self { spans, align, cache: Arc::new(Mutex::new(None)) }
+        Self { spans: spans.clone(), align, cache: RefCell::new(None), dirty: Cell::new(true), old: spans, old_text: None }
     }
 
+    /// Called by the engine every tick via `update_text_scale`. Always returns
+    /// a Text (cached when nothing changed), so the engine stays happy.
     pub fn build(&self, scale: f32) -> Text {
-        let span_keys: Vec<(String, Color)> = self.spans
-            .iter()
-            .map(|s| (s.text.clone(), s.color))
-            .collect();
+        Self::build_text(&self.spans, &self.align, scale)
+    }
 
-        let mut guard = self.cache.lock().unwrap();
+    /// Mark this spec as needing `set_text` to be called again.
+    pub fn mark_dirty(&self) {
+        self.dirty.set(true);
+    }
 
-        if let Some(ref entry) = *guard {
-            let scale_ok = (entry.scale - scale).abs() < 0.0001;
-            let keys_ok  = entry.span_keys == span_keys;
-            if scale_ok && keys_ok {
-                return entry.text.clone();
-            }
+    /// Returns true (and clears the flag) if `set_text` should be called.
+    /// Returns false on quiet frames — caller must skip `set_text` entirely.
+    pub fn take_dirty(&self) -> bool {
+        let was = self.dirty.get();
+        self.dirty.set(false);
+        was
+    }
+
+    fn content_hash(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        for s in &self.spans {
+            s.text.hash(&mut h);
+            s.font_size.to_bits().hash(&mut h);
+            s.letter_spacing.to_bits().hash(&mut h);
+            s.line_height.map(f32::to_bits).hash(&mut h);
+            format!("{:?}{:?}", s.font, s.color).hash(&mut h);
         }
+        format!("{:?}", self.align).hash(&mut h);
+        h.finish()
+    }
 
-        let start = Instant::now();
-
-        let spans: Vec<Span> = self.spans.iter().map(|s| {
+    fn build_text(spans: &[SpanSpec], align: &Align, scale: f32) -> Text {
+        let prism_spans: Vec<Span> = spans.iter().map(|s| {
             Span::new(
                 s.text.clone(),
                 s.font_size      * scale,
@@ -59,14 +78,7 @@ impl TextSpec {
                 s.letter_spacing * scale,
             )
         }).collect();
-
-        let text = Text::new(spans, None, self.align.clone(), None);
-
-        let elapsed = start.elapsed();
-        println!("Text build took: {:.3?}", elapsed);
-
-        *guard = Some(CacheEntry { span_keys, scale, text: text.clone() });
-        text
+        Text::new(prism_spans, None, align.clone(), None)
     }
 }
 
@@ -81,16 +93,14 @@ pub fn make_text_aligned(
     color:     Color,
     align:     Align,
 ) -> TextSpec {
-    TextSpec::new(vec![
-        SpanSpec {
-            text:           text.into(),
-            font_size,
-            line_height:    Some(font_size * 1.35),
-            font:           font.clone(),
-            color,
-            letter_spacing: 0.0,
-        }
-    ], align)
+    TextSpec::new(vec![SpanSpec {
+        text:           text.into(),
+        font_size,
+        line_height:    Some(font_size * 1.35),
+        font:           font.clone(),
+        color,
+        letter_spacing: 0.0,
+    }], align)
 }
 
 pub fn make_text_multi(spans: Vec<(String, f32, Font, Color)>, align: Align) -> TextSpec {
