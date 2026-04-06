@@ -2,6 +2,7 @@ use prism::canvas::{Color, Text};
 use crate::object::GameObject;
 use crate::value::{Expr, MathOp};
 use crate::sound::SoundOptions;
+use crate::crystalline::{PhysicsMaterial, PhysicsQuality, Emitter};
 use super::targeting::{Target, Location};
 use super::collision::CollisionMode;
 use super::condition::Condition;
@@ -41,6 +42,39 @@ pub enum Action {
     ClearGlow     { target: Target },
     SetTint       { target: Target, color: Color },
     ClearTint     { target: Target },
+
+    // -- Material (crystalline) ---
+    SetMaterial      { target: Target, material: PhysicsMaterial },
+    SetElasticity    { target: Target, value: f32 },
+    SetFriction      { target: Target, value: f32 },
+    SetDensity       { target: Target, value: f32 },
+
+    // -- Forces / impulses ---
+    ApplyForce       { target: Target, fx: f32, fy: f32 },
+    ApplyImpulse     { target: Target, ix: f32, iy: f32 },
+
+    // -- Position (ball_swing feedback) ---
+    SetPosition      { target: Target, x: f32, y: f32 },
+    SetCameraRelative { target: Target, enabled: bool },
+
+    // -- Body state ---
+    WakeBody         { target: Target },
+    FreezeBody       { target: Target },
+    UnfreezeBody     { target: Target },
+
+    // -- Per-body tuning ---
+    SetCollisionLayer { target: Target, layer: u32 },
+
+    // -- Global physics ---
+    SetPhysicsQuality { quality: PhysicsQuality },
+    EnableCrystalline,
+    DisableCrystalline,
+
+    // -- Particle lifecycle ---
+    SpawnEmitter     { emitter: Emitter },
+    RemoveEmitter    { name: String },
+    AttachEmitter    { emitter_name: String, target: Target },
+    DetachEmitter    { emitter_name: String },
 }
 
 impl Action {
@@ -129,4 +163,34 @@ impl Action {
     pub fn clear_glow(target: Target) -> Self { Action::ClearGlow { target } }
     pub fn set_tint(target: Target, color: Color) -> Self { Action::SetTint { target, color } }
     pub fn clear_tint(target: Target) -> Self { Action::ClearTint { target } }
+
+    // -- Crystalline convenience constructors --
+    pub fn set_material(target: Target, material: PhysicsMaterial) -> Self {
+        Action::SetMaterial { target, material }
+    }
+    pub fn set_elasticity(target: Target, value: f32) -> Self { Action::SetElasticity { target, value } }
+    pub fn set_friction(target: Target, value: f32) -> Self { Action::SetFriction { target, value } }
+    pub fn set_density(target: Target, value: f32) -> Self { Action::SetDensity { target, value } }
+    pub fn apply_force(target: Target, fx: f32, fy: f32) -> Self { Action::ApplyForce { target, fx, fy } }
+    pub fn apply_impulse(target: Target, ix: f32, iy: f32) -> Self { Action::ApplyImpulse { target, ix, iy } }
+    pub fn set_position(target: Target, x: f32, y: f32) -> Self { Action::SetPosition { target, x, y } }
+    pub fn set_camera_relative(target: Target, enabled: bool) -> Self {
+        Action::SetCameraRelative { target, enabled }
+    }
+    pub fn wake_body(target: Target) -> Self { Action::WakeBody { target } }
+    pub fn freeze_body(target: Target) -> Self { Action::FreezeBody { target } }
+    pub fn unfreeze_body(target: Target) -> Self { Action::UnfreezeBody { target } }
+    pub fn set_collision_layer(target: Target, layer: u32) -> Self {
+        Action::SetCollisionLayer { target, layer }
+    }
+    pub fn enable_crystalline() -> Self { Action::EnableCrystalline }
+    pub fn disable_crystalline() -> Self { Action::DisableCrystalline }
+    pub fn spawn_emitter(emitter: Emitter) -> Self { Action::SpawnEmitter { emitter } }
+    pub fn remove_emitter(name: impl Into<String>) -> Self { Action::RemoveEmitter { name: name.into() } }
+    pub fn attach_emitter(emitter_name: impl Into<String>, target: Target) -> Self {
+        Action::AttachEmitter { emitter_name: emitter_name.into(), target }
+    }
+    pub fn detach_emitter(emitter_name: impl Into<String>) -> Self {
+        Action::DetachEmitter { emitter_name: emitter_name.into() }
+    }
 }

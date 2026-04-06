@@ -29,3 +29,16 @@ impl CollisionMode {
     pub fn solid() -> Self { CollisionMode::Solid(CollisionShape::Rectangle) }
     pub fn solid_circle(radius: f32) -> Self { CollisionMode::Solid(CollisionShape::circle(radius)) }
 }
+
+pub mod collision_layers {
+    pub const NONE:       u32 = 0;
+    pub const DEFAULT:    u32 = 1 << 0;
+    pub const PLAYER:     u32 = 1 << 1;
+    pub const ENEMY:      u32 = 1 << 2;
+    pub const PROJECTILE: u32 = 1 << 3;
+    pub const PICKUP:     u32 = 1 << 4;
+    pub const TRIGGER:    u32 = 1 << 5;
+    pub const TERRAIN:    u32 = 1 << 6;
+    pub const PARTICLE:   u32 = 1 << 7;
+    pub const ALL:        u32 = u32::MAX;
+}

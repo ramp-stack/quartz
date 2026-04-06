@@ -57,7 +57,14 @@ impl OnEvent for Canvas {
 
             self.process_hot_reloads(DELTA_TIME);
             self.update_objects(DELTA_TIME);
-            self.handle_collisions();
+
+            if self.crystalline.is_some() {
+                self.run_crystalline_step(DELTA_TIME);
+            } else {
+                self.handle_collisions();
+            }
+
+            self.apply_camera_transform();
 
             let canvas_size = self.layout.canvas_size.get();
             let boundary_indices: Vec<usize> = self.store.objects.iter()

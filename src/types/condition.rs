@@ -18,6 +18,14 @@ pub enum Condition {
     Grounded(Target),
     Expr(String),
     HasTag(Target, String),
+
+    // -- Crystalline physics conditions ---
+    IsSleeping(Target),
+    IsMoving(Target),
+    SpeedAbove(Target, f32),
+    SpeedBelow(Target, f32),
+    CrystallineEnabled,
+    EmitterActive(String),
 }
 
 impl Condition {

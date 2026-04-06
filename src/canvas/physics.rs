@@ -45,6 +45,7 @@ impl Canvas {
 
     pub(crate) fn update_objects(&mut self, delta_time: f32) {
         let scale = self.layout.scale.get();
+        let has_crystalline = self.crystalline.is_some();
 
         for (idx, obj) in self.store.objects.iter_mut().enumerate() {
             obj.grounded = false;
@@ -58,10 +59,12 @@ impl Canvas {
             obj.update_text_scale(scale);
 
             if obj.visible {
-                obj.apply_gravity();
-                obj.update_position();
-                obj.apply_resistance();
-                obj.apply_rotation_momentum();
+                if !has_crystalline {
+                    obj.apply_gravity();
+                    obj.update_position();
+                    obj.apply_resistance();
+                    obj.apply_rotation_momentum();
+                }
                 self.layout.offsets[idx] = rotation_adjusted_offset(
                     obj.position, obj.size, obj.rotation, obj.slope.is_some(),
                 );
@@ -69,7 +72,6 @@ impl Canvas {
         }
 
         self.handle_infinite_scroll();
-        self.apply_camera_transform();
     }
 
     pub(crate) fn apply_camera_transform(&mut self) {

@@ -13,6 +13,7 @@ pub mod input;
 pub mod canvas;
 pub(crate) mod file_watcher;
 pub mod expr;
+pub mod crystalline;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ pub use prism::event::{Key, NamedKey};
 pub use types::{
     Action, Condition, GameEvent,
     Target, Location, Anchor,
-    CollisionMode, CollisionShape,
+    CollisionMode, CollisionShape, collision_layers,
     GlowConfig, HighlightEffect,
     MouseButton, ScrollAxis,
     ConditionOps,
@@ -53,6 +54,13 @@ pub use input::{
 
 pub use sound::{SoundOptions, SoundHandle};
 pub use expr::{parse_condition, parse_action};
+
+pub use crystalline::{
+    PhysicsMaterial, PhysicsConfig, PhysicsQuality,
+    CrystallinePhysics, PhysicsBody, PhysicsStepResult, BodyUpdate,
+    ParticleSystem, ParticleState, ParticleStepResult,
+    Emitter, EmitterBuilder, Particle, CollisionResponse,
+};
 pub use entropy::Entropy;
 pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
 pub use lerp::Lerp;

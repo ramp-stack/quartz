@@ -7,7 +7,7 @@ pub mod action;
 pub mod event;
 
 pub use targeting::{Target, Location, Anchor};
-pub use collision::{CollisionMode, CollisionShape};
+pub use collision::{CollisionMode, CollisionShape, collision_layers};
 pub use effects::{GlowConfig, HighlightEffect};
 pub use input_types::{MouseButton, ScrollAxis};
 pub use condition::{Condition, ConditionOps};
