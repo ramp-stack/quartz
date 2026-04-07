@@ -32,6 +32,12 @@ pub struct GameObjectBuilder {
     pub(super) material: PhysicsMaterial,
     pub(super) collision_layer: u32,
     pub(super) collision_mask: u32,
+    pub(super) planet_radius:        Option<f32>,
+    pub(super) gravity_target:       Option<String>,
+    pub(super) gravity_strength:     f32,
+    pub(super) auto_align:           bool,
+    pub(super) auto_align_speed:     f32,
+    pub(super) auto_align_threshold: f32,
 }
 
 impl GameObjectBuilder {
@@ -201,6 +207,55 @@ impl GameObjectBuilder {
         self
     }
 
+    // -- Planet gravity builders ------------------------------------------
+
+    /// Makes this object a circular planet body with the given radius.
+    pub fn planet(mut self, radius: f32) -> Self {
+        self.planet_radius = Some(radius.max(0.0));
+        self.is_platform = true;
+        self.collision_mode = CollisionMode::solid_circle(radius);
+        self
+    }
+
+    /// Sets the tag of planet bodies this object is attracted to.
+    pub fn gravity_target(mut self, tag: impl Into<String>) -> Self {
+        self.gravity_target = Some(tag.into());
+        self
+    }
+
+    /// Surface gravity acceleration in px/tick².
+    pub fn gravity_strength(mut self, strength: f32) -> Self {
+        self.gravity_strength = strength.max(0.0);
+        self
+    }
+
+    /// Enable auto-align to planet surface normal.
+    pub fn auto_align(mut self) -> Self {
+        self.auto_align = true;
+        self
+    }
+
+    /// Max rotation_momentum added per tick by auto-align (degrees/tick).
+    pub fn auto_align_speed(mut self, speed: f32) -> Self {
+        self.auto_align_speed = speed.max(0.0);
+        self
+    }
+
+    /// Auto-align activates only within this many degrees of the target angle.
+    pub fn auto_align_threshold(mut self, threshold: f32) -> Self {
+        self.auto_align_threshold = threshold.max(0.0);
+        self
+    }
+
+    /// Create a gravity attractor point. Not a solid body — it only pulls.
+    pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
+        self.planet_radius = Some(radius.max(0.0));
+        self.gravity_strength = strength.max(0.0);
+        self.is_platform = false;
+        self.collision_mode = CollisionMode::NonPlatform;
+        self
+    }
+
     // -- Material shortcuts -----------------------------------------------
 
     pub fn elasticity(mut self, val: f32) -> Self { self.material.elasticity = val; self }
@@ -278,6 +333,12 @@ impl GameObjectBuilder {
             material:        self.material,
             collision_layer: self.collision_layer,
             collision_mask:  self.collision_mask,
+            planet_radius:        self.planet_radius,
+            gravity_target:       self.gravity_target.clone(),
+            gravity_strength:     self.gravity_strength,
+            auto_align:           self.auto_align,
+            auto_align_speed:     self.auto_align_speed,
+            auto_align_threshold: self.auto_align_threshold,
         };
         if let Some(effect) = highlight {
             obj.set_highlight(effect);
@@ -305,5 +366,20 @@ impl GameObject {
             .static_object()
             .no_collision()
             .collision_layer(collision_layers::TRIGGER)
+    }
+
+    pub fn gravity_well(
+        id: impl Into<String>,
+        radius: f32,
+        strength: f32,
+        pos: (f32, f32),
+        tag: impl Into<String>,
+    ) -> GameObjectBuilder {
+        Self::build(id)
+            .size(radius * 2.0, radius * 2.0)
+            .position(pos.0 - radius, pos.1 - radius)
+            .tag(tag)
+            .gravity_well(radius, strength)
+            .static_object()
     }
 }

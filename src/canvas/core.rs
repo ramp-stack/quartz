@@ -56,7 +56,7 @@ impl Layout for CanvasLayout {
 
     fn build(&self, size: (f32, f32), children: Vec<SizeRequest>) -> Vec<Area> {
         assert_eq!(
-            self.offsets.len(),
+            self.offsets.len() + self.particle_offsets.len(),
             children.len(),
             "CanvasLayout: offset count must match child count"
         );
@@ -109,6 +109,8 @@ pub struct Canvas {
     pub(crate) last_particle_states: Vec<ParticleState>,
     pub(crate) particle_images:      Vec<Image>,
     pub(crate) image_cache:          HashMap<String, Image>,
+    /// Per-emitter attachment locations (emitter_name → Location).
+    pub(crate) emitter_locations:    HashMap<String, crate::types::Location>,
 }
 
 impl std::fmt::Debug for Canvas {

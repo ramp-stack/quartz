@@ -26,6 +26,10 @@ pub enum Condition {
     SpeedBelow(Target, f32),
     CrystallineEnabled,
     EmitterActive(String),
+
+    // -- Planet gravity conditions ---
+    OnPlanet(Target, Target),
+    InGravityField(Target, Target),
 }
 
 impl Condition {

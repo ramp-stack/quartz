@@ -86,6 +86,8 @@ pub struct PhysicsBody {
     /// Two non-platform bodies only interact if `layer_a & layer_b != 0`.
     /// Default 0 = no dynamic-dynamic collision (labels, UI, decorations).
     pub collision_layer: u32,
+    pub planet_radius:  Option<f32>,
+    pub gravity_target: Option<String>,
 }
 
 // ── Physics Config ───────────────────────────────────────────

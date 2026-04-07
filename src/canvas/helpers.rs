@@ -139,3 +139,18 @@ impl Canvas {
         self.image_cache.clear();
     }
 }
+
+// ── Planet gravity math helpers ──────────────────────────────────────────
+
+/// Returns the orbital speed for a circular orbit at the given distance.
+/// Formula: v = sqrt(gravity_strength * planet_radius / dist)
+pub fn orbit_speed(gravity_strength: f32, planet_radius: f32, orbit_dist: f32) -> f32 {
+    if orbit_dist <= 0.0 { return 0.0; }
+    (gravity_strength * planet_radius / orbit_dist).sqrt()
+}
+
+/// Returns the escape speed from a given distance.
+/// Formula: v_esc = sqrt(2) * orbit_speed
+pub fn escape_speed(gravity_strength: f32, planet_radius: f32, dist: f32) -> f32 {
+    orbit_speed(gravity_strength, planet_radius, dist) * std::f32::consts::SQRT_2
+}

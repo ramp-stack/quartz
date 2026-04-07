@@ -31,6 +31,7 @@ pub use types::{
 };
 
 pub use canvas::{Canvas, CanvasMode, CanvasLayout};
+pub use canvas::helpers::{orbit_speed, escape_speed};
 
 pub use object::{GameObject, GameObjectBuilder};
 
@@ -42,6 +43,7 @@ pub use sprite::{
     planet_atmosphere, glow_ring, tint_overlay,
     flip_horizontal, flip_vertical,
     rotate_cw, rotate_ccw, rotate_180,
+    star_field,
 };
 
 pub use scene::{Scene, SceneManager};

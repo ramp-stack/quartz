@@ -73,8 +73,13 @@ pub enum Action {
     // -- Particle lifecycle ---
     SpawnEmitter     { emitter: Emitter },
     RemoveEmitter    { name: String },
-    AttachEmitter    { emitter_name: String, target: Target },
+    AttachEmitter    { emitter_name: String, target: Target, location: Option<Location> },
     DetachEmitter    { emitter_name: String },
+
+    // -- Planet gravity actions ---
+    SetGravityStrength { target: Target, value: f32 },
+    SetPlanetRadius    { target: Target, value: f32 },
+    SetGravityTarget   { target: Target, tag: String },
 }
 
 impl Action {
@@ -188,9 +193,21 @@ impl Action {
     pub fn spawn_emitter(emitter: Emitter) -> Self { Action::SpawnEmitter { emitter } }
     pub fn remove_emitter(name: impl Into<String>) -> Self { Action::RemoveEmitter { name: name.into() } }
     pub fn attach_emitter(emitter_name: impl Into<String>, target: Target) -> Self {
-        Action::AttachEmitter { emitter_name: emitter_name.into(), target }
+        Action::AttachEmitter { emitter_name: emitter_name.into(), target, location: None }
+    }
+    pub fn attach_emitter_at(emitter_name: impl Into<String>, target: Target, location: Location) -> Self {
+        Action::AttachEmitter { emitter_name: emitter_name.into(), target, location: Some(location) }
     }
     pub fn detach_emitter(emitter_name: impl Into<String>) -> Self {
         Action::DetachEmitter { emitter_name: emitter_name.into() }
+    }
+    pub fn set_gravity_strength(target: Target, value: f32) -> Self {
+        Action::SetGravityStrength { target, value }
+    }
+    pub fn set_planet_radius(target: Target, value: f32) -> Self {
+        Action::SetPlanetRadius { target, value }
+    }
+    pub fn set_gravity_target(target: Target, tag: impl Into<String>) -> Self {
+        Action::SetGravityTarget { target, tag: tag.into() }
     }
 }

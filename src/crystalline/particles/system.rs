@@ -71,12 +71,44 @@ impl ParticleSystem {
         }
     }
 
+    /// Update an emitter's rotation in degrees.
+    pub fn set_emitter_rotation(&mut self, name: &str, rotation: f32) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.rotation = rotation;
+        }
+    }
+
     pub fn spawn_burst(&mut self, position: (f32, f32), count: usize, template: Particle) {
         let remaining = self.max_particles.saturating_sub(self.particles.len());
         for _ in 0..count.min(remaining) {
             let mut p = template.clone();
             p.position = position;
             self.particles.push(p);
+        }
+    }
+
+    /// Spawn a one-shot burst of particles using an emitter's spread parameters.
+    /// Each particle gets randomized velocity within the emitter's spread range.
+    pub fn spawn_burst_from_emitter(&mut self, emitter: &super::types::Emitter, count: usize) {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let remaining = self.max_particles.saturating_sub(self.particles.len());
+        for _ in 0..count.min(remaining) {
+            let vx = emitter.velocity_base.0
+                + (rng.r#gen::<f32>() - 0.5) * emitter.velocity_spread.0;
+            let vy = emitter.velocity_base.1
+                + (rng.r#gen::<f32>() - 0.5) * emitter.velocity_spread.1;
+            self.particles.push(super::types::Particle {
+                position: emitter.origin,
+                velocity: (vx, vy),
+                life: emitter.lifetime,
+                max_life: emitter.lifetime,
+                size: emitter.size,
+                color: emitter.color,
+                gravity_scale: emitter.gravity_scale,
+                rotation: 0.0,
+                collision_response: emitter.collision_response.clone(),
+            });
         }
     }
 
@@ -95,14 +127,23 @@ impl ParticleSystem {
             self.emit_accum[ei] += emitter.rate * dt;
             let to_spawn = self.emit_accum[ei] as usize;
             self.emit_accum[ei] -= to_spawn as f32;
+
+            // Pre-compute rotation transform for this emitter
+            let rad = emitter.rotation.to_radians();
+            let cos_r = rad.cos();
+            let sin_r = rad.sin();
+
             for _ in 0..to_spawn {
                 if self.particles.len() >= self.max_particles {
                     break;
                 }
-                let vx = emitter.velocity_base.0
+                let raw_vx = emitter.velocity_base.0
                     + (rng.r#gen::<f32>() - 0.5) * emitter.velocity_spread.0;
-                let vy = emitter.velocity_base.1
+                let raw_vy = emitter.velocity_base.1
                     + (rng.r#gen::<f32>() - 0.5) * emitter.velocity_spread.1;
+                // Rotate velocity by emitter rotation
+                let vx = raw_vx * cos_r - raw_vy * sin_r;
+                let vy = raw_vx * sin_r + raw_vy * cos_r;
                 self.particles.push(Particle {
                     position: emitter.origin,
                     velocity: (vx, vy),

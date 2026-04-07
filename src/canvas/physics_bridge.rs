@@ -249,6 +249,65 @@ impl Canvas {
         self.particle_system.as_mut()
     }
 
+    /// Spawn a one-shot burst of particles from an emitter definition.
+    /// Unlike `spawn_emitter`, this does NOT add a persistent emitter —
+    /// particles are created immediately and then dissipate on their own.
+    pub fn spawn_particle_burst(&mut self, emitter: &crate::crystalline::Emitter, count: usize) {
+        if let Some(ps) = &mut self.particle_system {
+            ps.spawn_burst_from_emitter(emitter, count);
+        }
+    }
+
+    // -- Planet gravity injection (crystalline path) ------------------------
+
+    pub(crate) fn inject_planet_gravity(&mut self) {
+        let planets: Vec<(usize, f32, f32, f32, Vec<String>)> = self.store.objects
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, obj)| {
+                let r = obj.planet_radius?;
+                let cx = obj.position.0 + obj.size.0 * 0.5;
+                let cy = obj.position.1 + obj.size.1 * 0.5;
+                Some((idx, cx, cy, r, obj.tags.clone()))
+            })
+            .collect();
+
+        for (obj_idx, obj) in self.store.objects.iter().enumerate() {
+            let tag = match &obj.gravity_target {
+                Some(t) => t,
+                None    => continue,
+            };
+            if !obj.visible || obj.is_platform { continue; }
+
+            let strength = obj.gravity_strength;
+            let obj_cx   = obj.position.0 + obj.size.0 * 0.5;
+            let obj_cy   = obj.position.1 + obj.size.1 * 0.5;
+
+            let mut fx = 0.0_f32;
+            let mut fy = 0.0_f32;
+
+            for &(planet_idx, pcx, pcy, radius, ref tags) in &planets {
+                if planet_idx == obj_idx { continue; }
+                if !tags.contains(tag) { continue; }
+
+                let dx   = pcx - obj_cx;
+                let dy   = pcy - obj_cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist < 1.0 { continue; }
+
+                let pull = strength * radius / dist;
+                fx += (dx / dist) * pull;
+                fy += (dy / dist) * pull;
+            }
+
+            if fx != 0.0 || fy != 0.0 {
+                if let Some(solver) = &mut self.crystalline {
+                    solver.apply_force(obj_idx, fx * 60.0, fy * 60.0);
+                }
+            }
+        }
+    }
+
     // -- Crystalline tick step --------------------------------------------
 
     /// Full crystalline physics step: build body snapshot → run solver →
@@ -257,6 +316,9 @@ impl Canvas {
     pub(crate) fn run_crystalline_step(&mut self, delta_time: f32) {
         // Sync emitter origins to attached objects.
         sync_emitter_origins(self);
+
+        // Inject planet gravity forces before stepping.
+        self.inject_planet_gravity();
 
         // Build physics body snapshot from store.
         let bodies = build_physics_bodies(self);
@@ -337,6 +399,8 @@ pub(crate) fn build_physics_bodies(canvas: &Canvas) -> Vec<PhysicsBody> {
             surface_velocity: obj.surface_velocity,
             material: obj.material,
             collision_layer: obj.collision_layer,
+            planet_radius: obj.planet_radius,
+            gravity_target: obj.gravity_target.clone(),
         }
     }).collect()
 }
@@ -378,20 +442,53 @@ pub(crate) fn sync_emitter_origins(canvas: &mut Canvas) {
         .collect();
 
     for (emitter_name, obj_name) in bindings {
-        let origin = canvas
+        let obj_data = canvas
             .store
             .name_to_index
             .get(obj_name.as_str())
             .and_then(|&idx| canvas.store.objects.get(idx))
-            .map(|obj| {
-                (
-                    obj.position.0 + obj.size.0 * 0.5,
-                    obj.position.1 + obj.size.1 * 0.5,
-                )
-            });
-        if let (Some(ps), Some(origin)) = (&mut canvas.particle_system, origin) {
-            ps.set_emitter_origin(&emitter_name, origin);
-        }
+            .map(|obj| (obj.position, obj.size, obj.rotation));
+
+        let (obj_pos, obj_size, obj_rotation) = match obj_data {
+            Some(d) => d,
+            None => continue,
+        };
+
+        let ps = match &mut canvas.particle_system {
+            Some(ps) => ps,
+            None => continue,
+        };
+
+        // Compute origin: use Location if set, otherwise center of object
+        let origin = if let Some(loc) = canvas.emitter_locations.get(&emitter_name) {
+            // Resolve anchor/offset relative to object center, then rotate
+            let (local_x, local_y) = match loc {
+                crate::types::Location::Position(pos) => *pos,
+                crate::types::Location::OnTarget { anchor, offset, .. } => {
+                    // Anchor is 0..1 over object size, offset in local px
+                    let ax = (anchor.x - 0.5) * obj_size.0 + offset.0;
+                    let ay = (anchor.y - 0.5) * obj_size.1 + offset.1;
+                    (ax, ay)
+                }
+                crate::types::Location::Relative { offset, .. } => *offset,
+                _ => (0.0, 0.0),
+            };
+            // Rotate local offset by object rotation
+            let rad = obj_rotation.to_radians();
+            let cos_r = rad.cos();
+            let sin_r = rad.sin();
+            let rx = local_x * cos_r - local_y * sin_r;
+            let ry = local_x * sin_r + local_y * cos_r;
+            let cx = obj_pos.0 + obj_size.0 * 0.5;
+            let cy = obj_pos.1 + obj_size.1 * 0.5;
+            (cx + rx, cy + ry)
+        } else {
+            // Default: center of object
+            (obj_pos.0 + obj_size.0 * 0.5, obj_pos.1 + obj_size.1 * 0.5)
+        };
+
+        ps.set_emitter_origin(&emitter_name, origin);
+        ps.set_emitter_rotation(&emitter_name, obj_rotation);
     }
 }
 

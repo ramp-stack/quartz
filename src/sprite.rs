@@ -422,3 +422,46 @@ impl std::fmt::Debug for AnimatedSprite {
     }
 }
 
+/// Generates a procedural star field image with randomly placed stars.
+pub fn star_field(width: u32, height: u32, star_count: u32, seed: u64) -> Image {
+    let mut img = RgbaImage::from_pixel(width, height, Rgba([5, 5, 15, 255]));
+
+    let mut state = seed.max(1);
+    let mut next = || -> u64 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for _ in 0..star_count {
+        let x = (next() % width as u64) as u32;
+        let y = (next() % height as u64) as u32;
+        let brightness = 100 + (next() % 156) as u8;
+        let size_roll = next() % 100;
+        let radius = if size_roll < 70 { 0 } else if size_roll < 92 { 1 } else { 2 };
+
+        for dy in 0..=radius * 2 {
+            for dx in 0..=radius * 2 {
+                let px = x as i32 + dx as i32 - radius as i32;
+                let py = y as i32 + dy as i32 - radius as i32;
+                if px >= 0 && py >= 0 && (px as u32) < width && (py as u32) < height {
+                    let dist = ((dx as f32 - radius as f32).powi(2)
+                              + (dy as f32 - radius as f32).powi(2)).sqrt();
+                    if dist <= radius as f32 + 0.5 {
+                        let falloff = 1.0 - (dist / (radius as f32 + 1.0));
+                        let b = (brightness as f32 * falloff).min(255.0) as u8;
+                        img.put_pixel(px as u32, py as u32, Rgba([b, b, b.saturating_add(20), 255]));
+                    }
+                }
+            }
+        }
+    }
+
+    Image {
+        shape: ShapeType::Rectangle(0.0, (width as f32, height as f32), 0.0),
+        image: img.into(),
+        color: None,
+    }
+}
+

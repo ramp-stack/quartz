@@ -44,6 +44,8 @@ impl Canvas {
     }
 
     pub(crate) fn update_objects(&mut self, delta_time: f32) {
+        self.apply_directional_gravity();
+
         let scale = self.layout.scale.get();
         let has_crystalline = self.crystalline.is_some();
 
@@ -96,6 +98,12 @@ impl Canvas {
                 obj.position, obj.size, obj.rotation, obj.slope.is_some(),
             );
             self.layout.offsets[idx] = (adj.0 - cam_x, adj.1 - cam_y);
+        }
+
+        // Also offset particle positions by camera so they render on-screen.
+        for offset in self.layout.particle_offsets.iter_mut() {
+            offset.0 -= cam_x;
+            offset.1 -= cam_y;
         }
 
         self.active_camera = Some(cam);
@@ -210,7 +218,7 @@ impl Canvas {
 
         for (obj_idx, dx, dy, plat_idx) in adjustments {
             let plat = &self.store.objects[plat_idx];
-            let (mut nx, mut ny) = match &plat.collision_mode {
+            let (nx, ny) = match &plat.collision_mode {
                 CollisionMode::Surface => {
                     let (mut nx, mut ny) = plat.surface_normal;
                     if plat.rotation != 0.0 && plat.slope.is_none() && ny > 0.0 { nx = -nx; ny = -ny; }
@@ -305,6 +313,189 @@ impl Canvas {
             println!("[hot-reload] file reloaded: {}", self.file_watchers[i].path);
         }
     }
+
+    // ── Planet gravity (legacy path) ─────────────────────────────────────
+
+    pub(crate) fn apply_directional_gravity(&mut self) {
+        if self.crystalline.is_some() { return; }
+
+        let planets: Vec<(usize, f32, f32, f32, Vec<String>)> = self.store.objects
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, obj)| {
+                let r = obj.planet_radius?;
+                let cx = obj.position.0 + obj.size.0 * 0.5;
+                let cy = obj.position.1 + obj.size.1 * 0.5;
+                Some((idx, cx, cy, r, obj.tags.clone()))
+            })
+            .collect();
+
+        let mut deltas: Vec<(usize, f32, f32)> = Vec::new();
+
+        for (obj_idx, obj) in self.store.objects.iter().enumerate() {
+            let tag = match &obj.gravity_target {
+                Some(t) => t,
+                None    => continue,
+            };
+            if !obj.visible { continue; }
+
+            let strength = obj.gravity_strength;
+            let obj_cx   = obj.position.0 + obj.size.0 * 0.5;
+            let obj_cy   = obj.position.1 + obj.size.1 * 0.5;
+
+            let mut total_dx = 0.0_f32;
+            let mut total_dy = 0.0_f32;
+
+            for &(planet_idx, planet_cx, planet_cy, radius, ref tags) in &planets {
+                if planet_idx == obj_idx { continue; }
+                if !tags.contains(tag) { continue; }
+
+                let dx   = planet_cx - obj_cx;
+                let dy   = planet_cy - obj_cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist < 1.0 { continue; }
+
+                let pull = strength * radius / dist;
+                total_dx += (dx / dist) * pull;
+                total_dy += (dy / dist) * pull;
+            }
+
+            if total_dx != 0.0 || total_dy != 0.0 {
+                deltas.push((obj_idx, total_dx, total_dy));
+            }
+        }
+
+        for (idx, dx, dy) in deltas {
+            self.store.objects[idx].momentum.0 += dx;
+            self.store.objects[idx].momentum.1 += dy;
+        }
+    }
+
+    pub(crate) fn handle_planet_landings(&mut self) {
+        if self.crystalline.is_some() { return; }
+
+        let planets: Vec<(usize, f32, f32, f32)> = self.store.objects
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, obj)| {
+                let r  = obj.planet_radius?;
+                let cx = obj.position.0 + obj.size.0 * 0.5;
+                let cy = obj.position.1 + obj.size.1 * 0.5;
+                Some((idx, cx, cy, r))
+            })
+            .collect();
+
+        let mut corrections: Vec<(usize, f32, f32, f32, f32)> = Vec::new();
+
+        for (obj_idx, obj) in self.store.objects.iter().enumerate() {
+            if !obj.visible || obj.planet_radius.is_some() { continue; }
+
+            let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+            let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+
+            for &(planet_idx, planet_cx, planet_cy, radius) in &planets {
+                if planet_idx == obj_idx { continue; }
+
+                let dx   = obj_cx - planet_cx;
+                let dy   = obj_cy - planet_cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                if dist >= radius || dist < 0.01 { continue; }
+
+                let nx = dx / dist;
+                let ny = dy / dist;
+
+                let surface_cx = planet_cx + nx * radius;
+                let surface_cy = planet_cy + ny * radius;
+                let new_pos_x  = surface_cx - obj.size.0 * 0.5;
+                let new_pos_y  = surface_cy - obj.size.1 * 0.5;
+
+                corrections.push((obj_idx, new_pos_x, new_pos_y, nx, ny));
+                break;
+            }
+        }
+
+        for (obj_idx, new_x, new_y, nx, ny) in corrections {
+            let obj = &mut self.store.objects[obj_idx];
+
+            let inward = obj.momentum.0 * (-nx) + obj.momentum.1 * (-ny);
+            if inward > 0.0 {
+                obj.momentum.0 += nx * inward;
+                obj.momentum.1 += ny * inward;
+            }
+
+            obj.position.0 = new_x;
+            obj.position.1 = new_y;
+
+            let adj = rotation_adjusted_offset(
+                obj.position, obj.size, obj.rotation, obj.slope.is_some(),
+            );
+            if let Some(offset) = self.layout.offsets.get_mut(obj_idx) {
+                *offset = adj;
+            }
+        }
+    }
+
+    pub(crate) fn apply_auto_align(&mut self) {
+        let planets_tagged: Vec<(Vec<String>, f32, f32)> = self.store.objects
+            .iter()
+            .filter_map(|obj| {
+                obj.planet_radius?;
+                let cx = obj.position.0 + obj.size.0 * 0.5;
+                let cy = obj.position.1 + obj.size.1 * 0.5;
+                Some((obj.tags.clone(), cx, cy))
+            })
+            .collect();
+
+        let mut adjustments: Vec<(usize, f32)> = Vec::new();
+
+        for (obj_idx, obj) in self.store.objects.iter().enumerate() {
+            if !obj.auto_align || !obj.visible { continue; }
+            let target_tag = match &obj.gravity_target {
+                Some(t) => t,
+                None    => continue,
+            };
+
+            let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+            let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+            let speed  = obj.auto_align_speed;
+            let thresh = obj.auto_align_threshold;
+
+            let nearest = planets_tagged.iter()
+                .filter(|(tags, _, _)| tags.iter().any(|t| t == target_tag))
+                .map(|(_, pcx, pcy)| {
+                    let dx = pcx - obj_cx;
+                    let dy = pcy - obj_cy;
+                    ((dx * dx + dy * dy).sqrt(), *pcx, *pcy)
+                })
+                .filter(|(d, _, _)| *d > 0.01)
+                .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+            let (_, planet_cx, planet_cy) = match nearest {
+                Some(n) => n,
+                None    => continue,
+            };
+
+            let dx = obj_cx - planet_cx;
+            let dy = obj_cy - planet_cy;
+            let target_angle = dy.atan2(dx).to_degrees() + 90.0;
+            let diff = shortest_angle_diff(obj.rotation, target_angle);
+
+            if diff.abs() > thresh { continue; }
+
+            let push = diff.signum() * speed.min(diff.abs());
+            adjustments.push((obj_idx, push));
+        }
+
+        for (idx, push) in adjustments {
+            self.store.objects[idx].rotation_momentum += push;
+        }
+    }
+}
+
+fn shortest_angle_diff(from: f32, to: f32) -> f32 {
+    let diff = (to - from).rem_euclid(360.0);
+    if diff > 180.0 { diff - 360.0 } else { diff }
 }
 
 // ── Free helpers ─────────────────────────────────────────────────────────────

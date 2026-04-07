@@ -64,6 +64,9 @@ impl OnEvent for Canvas {
                 self.handle_collisions();
             }
 
+            self.handle_planet_landings();
+            self.apply_auto_align();
+
             self.apply_camera_transform();
 
             let canvas_size = self.layout.canvas_size.get();

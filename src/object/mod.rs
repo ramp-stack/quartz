@@ -61,6 +61,16 @@ pub struct GameObject {
     pub material:            PhysicsMaterial,
     pub collision_layer:     u32,
     pub collision_mask:      u32,
+
+    // ── Planet gravity fields ──────────────────────────────────────
+    pub planet_radius:       Option<f32>,
+    pub gravity_target:      Option<String>,
+    pub gravity_strength:    f32,
+
+    // ── Auto-align fields ──────────────────────────────────────────
+    pub auto_align:           bool,
+    pub auto_align_speed:     f32,
+    pub auto_align_threshold: f32,
 }
 
 impl OnEvent for GameObject {}
@@ -134,6 +144,12 @@ impl GameObject {
             material:      PhysicsMaterial::default(),
             collision_layer: 0,
             collision_mask:  u32::MAX,
+            planet_radius:        None,
+            gravity_target:       None,
+            gravity_strength:     1.0,
+            auto_align:           false,
+            auto_align_speed:     3.0,
+            auto_align_threshold: 45.0,
         }
     }
 
@@ -185,6 +201,12 @@ impl GameObject {
             material:        PhysicsMaterial::default(),
             collision_layer: 0,
             collision_mask:  u32::MAX,
+            planet_radius:        None,
+            gravity_target:       None,
+            gravity_strength:     1.0,
+            auto_align:           false,
+            auto_align_speed:     3.0,
+            auto_align_threshold: 45.0,
         }
     }
 
@@ -236,6 +258,12 @@ impl GameObject {
             material:        PhysicsMaterial::default(),
             collision_layer: 0,
             collision_mask:  u32::MAX,
+            planet_radius:        None,
+            gravity_target:       None,
+            gravity_strength:     1.0,
+            auto_align:           false,
+            auto_align_speed:     3.0,
+            auto_align_threshold: 45.0,
         }
     }
 
@@ -332,7 +360,9 @@ impl GameObject {
     }
 
     pub fn apply_gravity(&mut self) {
-        self.momentum.1 += self.gravity;
+        if self.gravity_target.is_none() {
+            self.momentum.1 += self.gravity;
+        }
     }
 
     pub fn apply_resistance(&mut self) {

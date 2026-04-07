@@ -92,6 +92,68 @@ impl Canvas {
             Condition::EmitterActive(name) => {
                 self.particle_system.as_ref().map_or(false, |ps| ps.has_emitter(name))
             }
+
+            // -- Planet gravity conditions --
+            Condition::OnPlanet(object_target, planet_target) => {
+                let obj_indices    = self.store.get_indices(object_target);
+                let planet_indices = self.store.get_indices(planet_target);
+
+                obj_indices.iter().any(|&obj_idx| {
+                    let obj = match self.store.objects.get(obj_idx) {
+                        Some(o) => o,
+                        None    => return false,
+                    };
+                    let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+                    let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+
+                    planet_indices.iter().any(|&planet_idx| {
+                        let planet = match self.store.objects.get(planet_idx) {
+                            Some(p) if p.planet_radius.is_some() => p,
+                            _ => return false,
+                        };
+                        let radius    = planet.planet_radius.unwrap();
+                        let planet_cx = planet.position.0 + planet.size.0 * 0.5;
+                        let planet_cy = planet.position.1 + planet.size.1 * 0.5;
+
+                        let dx = obj_cx - planet_cx;
+                        let dy = obj_cy - planet_cy;
+                        let dist = (dx * dx + dy * dy).sqrt();
+
+                        dist <= radius + obj.size.0.max(obj.size.1) * 0.5 + 2.0
+                    })
+                })
+            }
+
+            Condition::InGravityField(object_target, planet_target) => {
+                let obj_indices    = self.store.get_indices(object_target);
+                let planet_indices = self.store.get_indices(planet_target);
+                let influence_mult = 3.0_f32;
+
+                obj_indices.iter().any(|&obj_idx| {
+                    let obj = match self.store.objects.get(obj_idx) {
+                        Some(o) => o,
+                        None    => return false,
+                    };
+                    let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+                    let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+
+                    planet_indices.iter().any(|&planet_idx| {
+                        let planet = match self.store.objects.get(planet_idx) {
+                            Some(p) if p.planet_radius.is_some() => p,
+                            _ => return false,
+                        };
+                        let radius    = planet.planet_radius.unwrap();
+                        let planet_cx = planet.position.0 + planet.size.0 * 0.5;
+                        let planet_cy = planet.position.1 + planet.size.1 * 0.5;
+
+                        let dx = obj_cx - planet_cx;
+                        let dy = obj_cy - planet_cy;
+                        let dist_sq = dx * dx + dy * dy;
+                        let influence = radius * influence_mult;
+                        dist_sq <= influence * influence
+                    })
+                })
+            }
         }
     }
 

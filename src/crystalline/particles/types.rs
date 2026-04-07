@@ -36,6 +36,8 @@ pub struct Emitter {
     pub color: (u8, u8, u8, u8),
     pub gravity_scale: f32,
     pub collision_response: CollisionResponse,
+    /// Rotation in degrees applied to velocity_base when emitting particles.
+    pub rotation: f32,
 }
 
 impl Emitter {
@@ -43,65 +45,101 @@ impl Emitter {
         Self { name: "fire".into(), origin: pos, rate: 60.0, lifetime: 0.8,
             velocity_base: (0.0, -80.0), velocity_spread: (30.0, 20.0),
             size: 4.0, color: (255, 120, 20, 220), gravity_scale: -0.2,
-            collision_response: CollisionResponse::Die }
+            collision_response: CollisionResponse::Die, rotation: 0.0 }
     }
     pub fn smoke(pos: (f32, f32)) -> Self {
         Self { name: "smoke".into(), origin: pos, rate: 20.0, lifetime: 2.0,
             velocity_base: (0.0, -30.0), velocity_spread: (15.0, 10.0),
             size: 8.0, color: (140, 140, 140, 100), gravity_scale: -0.1,
-            collision_response: CollisionResponse::None }
+            collision_response: CollisionResponse::None, rotation: 0.0 }
     }
     pub fn sparks(pos: (f32, f32)) -> Self {
         Self { name: "sparks".into(), origin: pos, rate: 80.0, lifetime: 0.4,
             velocity_base: (0.0, -120.0), velocity_spread: (80.0, 60.0),
             size: 2.0, color: (255, 220, 50, 255), gravity_scale: 0.8,
-            collision_response: CollisionResponse::Bounce { elasticity: 0.6 } }
+            collision_response: CollisionResponse::Bounce { elasticity: 0.6 }, rotation: 0.0 }
     }
     pub fn rain(canvas_width: f32) -> Self {
         Self { name: "rain".into(), origin: (canvas_width * 0.5, -20.0), rate: 200.0, lifetime: 2.5,
             velocity_base: (0.0, 300.0), velocity_spread: (canvas_width * 0.5, 40.0),
             size: 2.0, color: (100, 150, 255, 180), gravity_scale: 0.5,
-            collision_response: CollisionResponse::Die }
+            collision_response: CollisionResponse::Die, rotation: 0.0 }
     }
     pub fn snow(canvas_width: f32) -> Self {
         Self { name: "snow".into(), origin: (canvas_width * 0.5, -20.0), rate: 80.0, lifetime: 5.0,
             velocity_base: (0.0, 40.0), velocity_spread: (canvas_width * 0.5, 15.0),
             size: 3.0, color: (240, 245, 255, 200), gravity_scale: 0.05,
-            collision_response: CollisionResponse::Die }
+            collision_response: CollisionResponse::Die, rotation: 0.0 }
     }
     pub fn dust(pos: (f32, f32)) -> Self {
         Self { name: "dust".into(), origin: pos, rate: 15.0, lifetime: 0.6,
             velocity_base: (0.0, -10.0), velocity_spread: (20.0, 10.0),
             size: 3.0, color: (160, 130, 90, 120), gravity_scale: 0.1,
-            collision_response: CollisionResponse::None }
+            collision_response: CollisionResponse::None, rotation: 0.0 }
     }
     pub fn explosion(pos: (f32, f32)) -> Self {
         Self { name: "explosion".into(), origin: pos, rate: 500.0, lifetime: 0.5,
             velocity_base: (0.0, 0.0), velocity_spread: (200.0, 200.0),
             size: 4.0, color: (255, 180, 50, 255), gravity_scale: 0.3,
-            collision_response: CollisionResponse::Die }
+            collision_response: CollisionResponse::Die, rotation: 0.0 }
     }
     pub fn trail(color: (u8, u8, u8, u8)) -> Self {
         Self { name: "trail".into(), origin: (0.0, 0.0), rate: 30.0, lifetime: 0.5,
             velocity_base: (0.0, 0.0), velocity_spread: (5.0, 5.0),
             size: 3.0, color, gravity_scale: 0.0,
-            collision_response: CollisionResponse::None }
+            collision_response: CollisionResponse::None, rotation: 0.0 }
     }
     pub fn confetti(pos: (f32, f32)) -> Self {
         Self { name: "confetti".into(), origin: pos, rate: 100.0, lifetime: 2.0,
             velocity_base: (0.0, -60.0), velocity_spread: (100.0, 80.0),
             size: 5.0, color: (255, 100, 200, 255), gravity_scale: 0.4,
-            collision_response: CollisionResponse::Bounce { elasticity: 0.3 } }
+            collision_response: CollisionResponse::Bounce { elasticity: 0.3 }, rotation: 0.0 }
     }
     pub fn bubbles(pos: (f32, f32)) -> Self {
         Self { name: "bubbles".into(), origin: pos, rate: 12.0, lifetime: 3.0,
             velocity_base: (0.0, -40.0), velocity_spread: (15.0, 10.0),
             size: 6.0, color: (180, 220, 255, 150), gravity_scale: -0.15,
-            collision_response: CollisionResponse::Bounce { elasticity: 0.2 } }
+            collision_response: CollisionResponse::Bounce { elasticity: 0.2 }, rotation: 0.0 }
     }
+
+    // -- Space particle presets -------------------------------------------
+
+    pub fn thruster_exhaust(pos: (f32, f32)) -> Self {
+        Self { name: "thruster".into(), origin: pos, rate: 80.0, lifetime: 0.4,
+            velocity_base: (0.0, 60.0), velocity_spread: (25.0, 15.0),
+            size: 3.0, color: (255, 180, 50, 200), gravity_scale: 0.0,
+            collision_response: CollisionResponse::Die, rotation: 0.0 }
+    }
+    pub fn reentry_sparks(pos: (f32, f32)) -> Self {
+        Self { name: "reentry".into(), origin: pos, rate: 120.0, lifetime: 0.25,
+            velocity_base: (0.0, 0.0), velocity_spread: (80.0, 80.0),
+            size: 2.0, color: (255, 100, 30, 255), gravity_scale: 0.0,
+            collision_response: CollisionResponse::Die, rotation: 0.0 }
+    }
+    pub fn asteroid_debris(pos: (f32, f32)) -> Self {
+        Self { name: "debris".into(), origin: pos, rate: 15.0, lifetime: 3.0,
+            velocity_base: (0.0, 0.0), velocity_spread: (30.0, 30.0),
+            size: 5.0, color: (140, 120, 100, 180), gravity_scale: 0.3,
+            collision_response: CollisionResponse::Bounce { elasticity: 0.4 }, rotation: 0.0 }
+    }
+    pub fn solar_wind(_canvas_width: f32) -> Self {
+        Self { name: "solar_wind".into(), origin: (0.0, 0.0), rate: 40.0, lifetime: 5.0,
+            velocity_base: (20.0, 5.0), velocity_spread: (5.0, 3.0),
+            size: 2.0, color: (255, 255, 200, 60), gravity_scale: 0.0,
+            collision_response: CollisionResponse::None, rotation: 0.0 }
+    }
+
     pub fn named(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
         self
+    }
+
+    /// One-shot hull damage burst — small debris chunks flying outward.
+    pub fn damage_burst(pos: (f32, f32)) -> Self {
+        Self { name: "damage".into(), origin: pos, rate: 300.0, lifetime: 0.3,
+            velocity_base: (0.0, 0.0), velocity_spread: (160.0, 160.0),
+            size: 4.0, color: (200, 180, 160, 230), gravity_scale: 0.0,
+            collision_response: CollisionResponse::None, rotation: 0.0 }
     }
 }
 
@@ -118,7 +156,7 @@ impl EmitterBuilder {
                 name: name.into(), origin: (0.0, 0.0), rate: 30.0, lifetime: 1.0,
                 velocity_base: (0.0, 0.0), velocity_spread: (10.0, 10.0),
                 size: 4.0, color: (255, 255, 255, 255), gravity_scale: 0.0,
-                collision_response: CollisionResponse::None,
+                collision_response: CollisionResponse::None, rotation: 0.0,
             },
         }
     }

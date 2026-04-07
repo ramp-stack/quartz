@@ -50,6 +50,7 @@ impl Canvas {
             last_particle_states: Vec::new(),
             particle_images:      Vec::new(),
             image_cache:          HashMap::new(),
+            emitter_locations:    HashMap::new(),
         }
     }
 
@@ -418,14 +419,40 @@ impl Canvas {
             Action::RemoveEmitter { name } => {
                 self.remove_emitter(&name);
             }
-            Action::AttachEmitter { emitter_name, target } => {
+            Action::AttachEmitter { emitter_name, target, location } => {
                 if let Some(name) = self.store.get_names(&target).first() {
                     self.attach_emitter_to(&emitter_name, name);
+                }
+                if let Some(loc) = location {
+                    self.emitter_locations.insert(emitter_name, loc);
                 }
             }
             Action::DetachEmitter { emitter_name } => {
                 let key = format!("_emitter_bind_{}", emitter_name);
                 self.game_vars.remove(&key);
+                self.emitter_locations.remove(&emitter_name);
+            }
+
+            // -- Planet gravity actions --
+            Action::SetGravityStrength { target, value } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.gravity_strength = value.max(0.0);
+                });
+            }
+            Action::SetPlanetRadius { target, value } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    if value > 0.0 {
+                        obj.planet_radius = Some(value);
+                    } else {
+                        obj.planet_radius = None;
+                    }
+                });
+            }
+            Action::SetGravityTarget { target, tag } => {
+                let tag_val = if tag.is_empty() { None } else { Some(tag.clone()) };
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.gravity_target = tag_val.clone();
+                });
             }
         }
     }
