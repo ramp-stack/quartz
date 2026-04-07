@@ -433,6 +433,48 @@ impl Canvas {
                 self.emitter_locations.remove(&emitter_name);
             }
 
+            // -- Emitter modification actions --
+            Action::SetEmitterRate { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_rate(&name, value);
+                }
+            }
+            Action::SetEmitterLifetime { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_lifetime(&name, value);
+                }
+            }
+            Action::SetEmitterVelocity { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_velocity(&name, value);
+                }
+            }
+            Action::SetEmitterSpread { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_spread(&name, value);
+                }
+            }
+            Action::SetEmitterSize { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_size(&name, value);
+                }
+            }
+            Action::SetEmitterColor { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_color(&name, value);
+                }
+            }
+            Action::SetEmitterGravityScale { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_gravity_scale(&name, value);
+                }
+            }
+            Action::SetEmitterCollision { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_collision(&name, value);
+                }
+            }
+
             // -- Planet gravity actions --
             Action::SetGravityStrength { target, value } => {
                 self.store.apply_to_targets(&target, |obj| {

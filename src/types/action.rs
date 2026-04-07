@@ -2,7 +2,7 @@ use prism::canvas::{Color, Text};
 use crate::object::GameObject;
 use crate::value::{Expr, MathOp};
 use crate::sound::SoundOptions;
-use crate::crystalline::{PhysicsMaterial, PhysicsQuality, Emitter};
+use crate::crystalline::{PhysicsMaterial, PhysicsQuality, Emitter, CollisionResponse};
 use super::targeting::{Target, Location};
 use super::collision::CollisionMode;
 use super::condition::Condition;
@@ -75,6 +75,16 @@ pub enum Action {
     RemoveEmitter    { name: String },
     AttachEmitter    { emitter_name: String, target: Target, location: Option<Location> },
     DetachEmitter    { emitter_name: String },
+
+    // -- Emitter modification ---
+    SetEmitterRate          { name: String, value: f32 },
+    SetEmitterLifetime      { name: String, value: f32 },
+    SetEmitterVelocity      { name: String, value: (f32, f32) },
+    SetEmitterSpread        { name: String, value: (f32, f32) },
+    SetEmitterSize          { name: String, value: f32 },
+    SetEmitterColor         { name: String, value: (u8, u8, u8, u8) },
+    SetEmitterGravityScale  { name: String, value: f32 },
+    SetEmitterCollision     { name: String, value: CollisionResponse },
 
     // -- Planet gravity actions ---
     SetGravityStrength { target: Target, value: f32 },
@@ -200,6 +210,30 @@ impl Action {
     }
     pub fn detach_emitter(emitter_name: impl Into<String>) -> Self {
         Action::DetachEmitter { emitter_name: emitter_name.into() }
+    }
+    pub fn set_emitter_rate(name: impl Into<String>, value: f32) -> Self {
+        Action::SetEmitterRate { name: name.into(), value }
+    }
+    pub fn set_emitter_lifetime(name: impl Into<String>, value: f32) -> Self {
+        Action::SetEmitterLifetime { name: name.into(), value }
+    }
+    pub fn set_emitter_velocity(name: impl Into<String>, vx: f32, vy: f32) -> Self {
+        Action::SetEmitterVelocity { name: name.into(), value: (vx, vy) }
+    }
+    pub fn set_emitter_spread(name: impl Into<String>, sx: f32, sy: f32) -> Self {
+        Action::SetEmitterSpread { name: name.into(), value: (sx, sy) }
+    }
+    pub fn set_emitter_size(name: impl Into<String>, value: f32) -> Self {
+        Action::SetEmitterSize { name: name.into(), value }
+    }
+    pub fn set_emitter_color(name: impl Into<String>, r: u8, g: u8, b: u8, a: u8) -> Self {
+        Action::SetEmitterColor { name: name.into(), value: (r, g, b, a) }
+    }
+    pub fn set_emitter_gravity_scale(name: impl Into<String>, value: f32) -> Self {
+        Action::SetEmitterGravityScale { name: name.into(), value }
+    }
+    pub fn set_emitter_collision(name: impl Into<String>, value: CollisionResponse) -> Self {
+        Action::SetEmitterCollision { name: name.into(), value }
     }
     pub fn set_gravity_strength(target: Target, value: f32) -> Self {
         Action::SetGravityStrength { target, value }

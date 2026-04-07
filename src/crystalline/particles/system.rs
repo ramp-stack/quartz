@@ -78,6 +78,54 @@ impl ParticleSystem {
         }
     }
 
+    pub fn set_emitter_rate(&mut self, name: &str, rate: f32) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.rate = rate;
+        }
+    }
+
+    pub fn set_emitter_lifetime(&mut self, name: &str, lifetime: f32) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.lifetime = lifetime;
+        }
+    }
+
+    pub fn set_emitter_velocity(&mut self, name: &str, velocity: (f32, f32)) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.velocity_base = velocity;
+        }
+    }
+
+    pub fn set_emitter_spread(&mut self, name: &str, spread: (f32, f32)) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.velocity_spread = spread;
+        }
+    }
+
+    pub fn set_emitter_size(&mut self, name: &str, size: f32) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.size = size;
+        }
+    }
+
+    pub fn set_emitter_color(&mut self, name: &str, color: (u8, u8, u8, u8)) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.color = color;
+        }
+    }
+
+    pub fn set_emitter_gravity_scale(&mut self, name: &str, gravity_scale: f32) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.gravity_scale = gravity_scale;
+        }
+    }
+
+    pub fn set_emitter_collision(&mut self, name: &str, response: CollisionResponse) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.collision_response = response;
+        }
+    }
+
     pub fn spawn_burst(&mut self, position: (f32, f32), count: usize, template: Particle) {
         let remaining = self.max_particles.saturating_sub(self.particles.len());
         for _ in 0..count.min(remaining) {
