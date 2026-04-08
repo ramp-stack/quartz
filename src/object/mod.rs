@@ -1,16 +1,21 @@
+mod builder;
+mod geometry;
+
+pub use builder::GameObjectBuilder;
+
 use prism::event::OnEvent;
-use prism::drawable::{Drawable, Component, SizedTree};
+use prism::drawable::{Drawable, Component};
 use prism::Context;
-use prism::layout::{Area, SizeRequest};
 use prism::canvas::{Image, ShapeType, Color};
 use crate::text::TextSpec;
-use crate::sprite::AnimatedSprite;
-use crate::types::{CollisionMode, Anchor, GlowConfig, HighlightEffect};
+use crate::sprite::{AnimatedSprite, reload_image_raw, LAST_ASSET_PATH};
+use crate::types::{CollisionMode, GlowConfig, HighlightEffect};
+use crate::crystalline::PhysicsMaterial;
 use std::cell::Cell;
 
 /// Reads and clears the thread-local path set by `load_image` / `load_animation`,
 /// and records the file's current mtime alongside it.
-fn capture_asset_path() -> (Option<String>, Option<std::time::SystemTime>) {
+pub(super) fn capture_asset_path() -> (Option<String>, Option<std::time::SystemTime>) {
     let path = LAST_ASSET_PATH.with(|p| p.borrow_mut().take());
     let mtime = path.as_ref()
         .and_then(|p| std::fs::metadata(p).ok())
@@ -23,7 +28,7 @@ pub struct GameObject {
     layout:              prism::layout::Stack,
     pub id:              String,
     pub tags:            Vec<String>,
-    drawable:            Option<Box<dyn Drawable>>,
+    pub(crate) drawable: Option<Box<dyn Drawable>>,
     pub animated_sprite: Option<AnimatedSprite>,
     pub size:            (f32, f32),
     pub position:        (f32, f32),
@@ -34,22 +39,13 @@ pub struct GameObject {
     pub is_platform:     bool,
     pub visible:         bool,
     pub layer:           Option<u32>,
-    text_spec:           Option<TextSpec>,
-    last_text_scale:     Cell<f32>,
+    pub(crate) text_spec:       Option<TextSpec>,
+    pub(crate) last_text_scale: Cell<f32>,
     // hot-reload tracking — populated automatically when load_image / load_animation is used
     pub(crate) image_path:      Option<String>,
     pub(crate) animation_path:  Option<String>,
     pub(crate) image_mtime:     Option<std::time::SystemTime>,
     pub(crate) animation_mtime: Option<std::time::SystemTime>,
-    pub size:         (f32, f32),
-    pub position:     (f32, f32),
-    pub momentum:     (f32, f32),
-    pub resistance:   (f32, f32),
-    pub gravity:      f32,
-    pub scaled_size:  Cell<(f32, f32)>,
-    pub is_platform:  bool,
-    pub visible:      bool,
-    pub layer:        Option<u32>,
     pub rotation:            f32,
     pub slope:               Option<(f32, f32)>,
     pub one_way:             bool,
@@ -58,12 +54,23 @@ pub struct GameObject {
     pub rotation_resistance: f32,
     pub surface_normal:      (f32, f32),
     pub collision_mode:      CollisionMode,
-    pub highlight:    Option<HighlightEffect>,
-    glow_drawable: Option<Box<dyn Drawable>>,
-    tint_drawable: Option<Box<dyn Drawable>>,
+    pub highlight:           Option<HighlightEffect>,
+    pub(crate) glow_drawable:    Option<Box<dyn Drawable>>,
+    pub(crate) tint_drawable:    Option<Box<dyn Drawable>>,
     pub grounded:            bool,
-    text_spec:        Option<TextSpec>,
-    last_text_scale:  Cell<f32>, 
+    pub material:            PhysicsMaterial,
+    pub collision_layer:     u32,
+    pub collision_mask:      u32,
+
+    // ── Planet gravity fields ──────────────────────────────────────
+    pub planet_radius:       Option<f32>,
+    pub gravity_target:      Option<String>,
+    pub gravity_strength:    f32,
+
+    // ── Auto-align fields ──────────────────────────────────────────
+    pub auto_align:           bool,
+    pub auto_align_speed:     f32,
+    pub auto_align_threshold: f32,
 }
 
 impl OnEvent for GameObject {}
@@ -72,15 +79,12 @@ impl Component for GameObject {
     fn children(&self) -> Vec<&dyn Drawable> {
         if self.visible {
             let mut result = Vec::new();
-            // Main drawable
             if let Some(d) = &self.drawable {
                 result.push(d.as_ref() as &dyn Drawable);
             }
-            // Glow ring renders on top of main drawable
             if let Some(glow) = &self.glow_drawable {
                 result.push(glow.as_ref() as &dyn Drawable);
             }
-            // Tint overlay renders on top of everything
             if let Some(tint) = &self.tint_drawable {
                 result.push(tint.as_ref() as &dyn Drawable);
             }
@@ -136,7 +140,16 @@ impl GameObject {
             rotation_resistance: 0.85,
             surface_normal: (0.0, -1.0),
             collision_mode: CollisionMode::Surface,
-            highlight:     None,            
+            highlight:     None,
+            material:      PhysicsMaterial::default(),
+            collision_layer: 0,
+            collision_mask:  u32::MAX,
+            planet_radius:        None,
+            gravity_target:       None,
+            gravity_strength:     1.0,
+            auto_align:           false,
+            auto_align_speed:     3.0,
+            auto_align_threshold: 45.0,
         }
     }
 
@@ -185,6 +198,15 @@ impl GameObject {
             image_mtime,
             animation_path:  None,
             animation_mtime: None,
+            material:        PhysicsMaterial::default(),
+            collision_layer: 0,
+            collision_mask:  u32::MAX,
+            planet_radius:        None,
+            gravity_target:       None,
+            gravity_strength:     1.0,
+            auto_align:           false,
+            auto_align_speed:     3.0,
+            auto_align_threshold: 45.0,
         }
     }
 
@@ -233,6 +255,15 @@ impl GameObject {
             image_mtime,
             animation_path:  None,
             animation_mtime: None,
+            material:        PhysicsMaterial::default(),
+            collision_layer: 0,
+            collision_mask:  u32::MAX,
+            planet_radius:        None,
+            gravity_target:       None,
+            gravity_strength:     1.0,
+            auto_align:           false,
+            auto_align_speed:     3.0,
+            auto_align_threshold: 45.0,
         }
     }
 
@@ -329,7 +360,9 @@ impl GameObject {
     }
 
     pub fn apply_gravity(&mut self) {
-        self.momentum.1 += self.gravity;
+        if self.gravity_target.is_none() {
+            self.momentum.1 += self.gravity;
+        }
     }
 
     pub fn apply_resistance(&mut self) {
@@ -441,8 +474,6 @@ impl GameObject {
             }
         }
 
-        // Keep all image-based drawables synchronized to the current screen scale
-        // in the same frame they are rebuilt to avoid one-frame oversize flashes.
         self.update_image_shape();
     }
 
@@ -505,31 +536,8 @@ impl GameObject {
         self.last_text_scale.set(scale);
     }
 
-    pub fn check_boundary_collision(&self, canvas_size: (f32, f32)) -> bool {
-        self.position.0 <= 0.0
-            || self.position.0 + self.size.0 >= canvas_size.0
-            || self.position.1 <= 0.0
-            || self.position.1 + self.size.1 >= canvas_size.1
-    }
-
-    pub fn get_anchor_position(&self, anchor: Anchor) -> (f32, f32) {
-        (
-            self.position.0 + self.size.0 * anchor.x,
-            self.position.1 + self.size.1 * anchor.y,
-        )
-    }
-
-    pub fn contains_point(&self, point: (f32, f32)) -> bool {
-        point.0 >= self.position.0
-            && point.0 <= self.position.0 + self.size.0
-            && point.1 >= self.position.1
-            && point.1 <= self.position.1 + self.size.1
-    }
-
     // ── Hot-reload internals ─────────────────────────────────────────────────
 
-    /// Called by the canvas tick. Reloads the image from disk if the file has
-    /// changed since the last poll. No-op if the object has no tracked path.
     pub(crate) fn hot_reload_image(&mut self, path: &str) {
         let Ok(meta)  = std::fs::metadata(path) else { return };
         let Ok(mtime) = meta.modified()          else { return };
@@ -543,8 +551,6 @@ impl GameObject {
         println!("[hot-reload] image reloaded: {path}");
     }
 
-    /// Called by the canvas tick. Reloads the animation from disk if the file
-    /// has changed since the last poll. No-op if the object has no tracked path.
     pub(crate) fn hot_reload_animation(&mut self, path: &str) {
         let Ok(meta)  = std::fs::metadata(path) else { return };
         let Ok(mtime) = meta.modified()          else { return };
@@ -559,296 +565,9 @@ impl GameObject {
                     self.animation_mtime   = Some(mtime);
                     println!("[hot-reload] animation reloaded: {path}");
                 }
-                Err(e) => eprintln!("[hot-reload] failed to decode animation '{path}': {e}"),
+                Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
             },
-            Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
-    pub fn apply_rotation_momentum(&mut self) {
-        if self.rotation_momentum == 0.0 { return; }
-        self.rotation += self.rotation_momentum;
-        self.rotation_momentum *= self.rotation_resistance;
-        if self.rotation_momentum.abs() < 0.01 {
-            self.rotation_momentum = 0.0;
+            Err(e) => eprintln!("[hot-reload] failed to open '{path}': {e}"),
         }
-        if self.is_platform {
-            self.sync_rotation_normal();
-        }
-    }
-
-    pub fn sync_rotation_normal(&mut self) {
-        let theta = self.rotation.to_radians();
-        self.surface_normal = (theta.sin(), -theta.cos());
-    }
-
-    pub fn slope_surface_y(&self, world_x: f32) -> f32 {
-        match self.slope {
-            None => self.position.1,
-            Some((left_offset, right_offset)) => {
-                if self.size.0 == 0.0 { return self.position.1; }
-                let t = ((world_x - self.position.0) / self.size.0).clamp(0.0, 1.0);
-                self.position.1 + left_offset + (right_offset - left_offset) * t
-            }
-        }
-    }
-
-    pub fn rotation_from_slope(&self) -> f32 {
-        match self.slope {
-            None => 0.0,
-            Some((left_offset, right_offset)) => {
-                (right_offset - left_offset).atan2(self.size.0).to_degrees()
-            }
-        }
-    }
-
-    pub fn surface_normal_at(&self, _world_x: f32) -> (f32, f32) {
-        match self.slope {
-            None => self.surface_normal,
-            Some((left_offset, right_offset)) => {
-                let w = self.size.0;
-                if w < 0.01 { return (0.0, -1.0); }
-                let rise = right_offset - left_offset;
-                let len  = (rise * rise + w * w).sqrt();
-                (rise / len, -w / len)
-            }
-        }
-    }
-
-    pub fn slope_aabb(&self) -> (f32, f32, f32, f32) {
-        match self.slope {
-            None => (self.position.0, self.position.1, self.size.0, self.size.1),
-            Some((left_off, right_off)) => {
-                let left_y = self.position.1 + left_off;
-                let right_y = self.position.1 + right_off;
-                let top = left_y.min(right_y);
-                let bottom = left_y.max(right_y) + self.size.1;
-                (self.position.0, top, self.size.0, bottom - top)
-            }
-        }
-    }
-}
-
-// ── Builder ──────────────────────────────────────────────────────────────────
-
-pub struct GameObjectBuilder {
-    id:          String,
-    image:       Option<Image>,
-    image_path:  Option<String>,
-    image_mtime: Option<std::time::SystemTime>,
-    size:        (f32, f32),
-    position:    (f32, f32),
-    tags:        Vec<String>,
-    momentum:    (f32, f32),
-    resistance:  (f32, f32),
-    gravity:     f32,
-    is_platform: bool,
-    pub layer:   Option<u32>,
-    rotation:    f32,
-    slope:       Option<(f32, f32)>,
-    one_way:     bool,
-    surface_velocity: Option<f32>,
-    pub rotation_momentum: f32,
-    pub rotation_resistance: f32,
-    surface_normal: (f32, f32),
-    collision_mode: CollisionMode,
-    highlight: Option<HighlightEffect>,
-}
-
-impl GameObjectBuilder {
-    pub fn layer(mut self, id: u32) -> Self {
-        self.layer = Some(id);
-        self
-    }
-
-    pub fn image(mut self, image: Image) -> Self {
-        // Capture path here while the thread-local is still hot from load_image / load_image_sized.
-        let (path, mtime) = capture_asset_path();
-        self.image_path  = path;
-        self.image_mtime = mtime;
-        self.image = Some(image);
-        self
-    }
-
-    pub fn size(mut self, w: f32, h: f32) -> Self {
-        self.size = (w, h);
-        self
-    }
-
-    pub fn position(mut self, x: f32, y: f32) -> Self {
-        self.position = (x, y);
-        self
-    }
-
-    pub fn tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.push(tag.into());
-        self
-    }
-
-    pub fn momentum(mut self, x: f32, y: f32) -> Self {
-        self.momentum = (x, y);
-        self
-    }
-
-    pub fn resistance(mut self, x: f32, y: f32) -> Self {
-        self.resistance = (x, y);
-        self
-    }
-
-    pub fn gravity(mut self, g: f32) -> Self {
-        self.gravity = g;
-        self
-    }
-
-    pub fn platform(mut self) -> Self {
-        self.is_platform    = true;
-        self.surface_normal = (0.0, -1.0);
-        self
-    }
-
-    pub fn floor(mut self) -> Self {
-        self.platform()
-    }
-
-    pub fn ceiling(mut self) -> Self {
-        self.is_platform    = true;
-        self.surface_normal = (0.0, 1.0);
-        self
-    }
-
-    pub fn wall_left(mut self) -> Self {
-        self.is_platform    = true;
-        self.surface_normal = (1.0, 0.0);
-        self
-    }
-
-    pub fn wall_right(mut self) -> Self {
-        self.is_platform    = true;
-        self.surface_normal = (-1.0, 0.0);
-        self
-    }
-
-    pub fn surface(mut self, nx: f32, ny: f32) -> Self {
-        self.is_platform = true;
-        let len = (nx * nx + ny * ny).sqrt().max(0.001);
-        self.surface_normal = (nx / len, ny / len);
-        self
-    }
-
-    pub fn rotation(mut self, degrees: f32) -> Self {
-        self.rotation = degrees;
-        self
-    }
-
-    pub fn slope(mut self, left_offset: f32, right_offset: f32) -> Self {
-        self.slope = Some((left_offset, right_offset));
-        self
-    }
-
-    pub fn slope_auto_rotation(mut self, left_offset: f32, right_offset: f32) -> Self {
-        self.slope = Some((left_offset, right_offset));
-        if self.size.0 != 0.0 {
-            self.rotation = (right_offset - left_offset).atan2(self.size.0).to_degrees();
-        }
-        self
-    }
-
-    pub fn one_way(mut self) -> Self {
-        self.one_way = true;
-        self
-    }
-
-    pub fn surface_velocity(mut self, vx: f32) -> Self {
-        self.surface_velocity = Some(vx);
-        self
-    }
-
-    pub fn rotation_resistance(mut self, resistance: f32) -> Self {
-        self.rotation_resistance = resistance.clamp(0.0, 1.0);
-        self
-    }
-
-    pub fn solid(mut self) -> Self {
-        self.collision_mode = CollisionMode::solid();
-        self.is_platform = true;
-        self
-    }
-
-    pub fn solid_circle(mut self, radius: f32) -> Self {
-        self.collision_mode = CollisionMode::solid_circle(radius);
-        self.is_platform = true;
-        self
-    }
-
-    pub fn collision_mode(mut self, mode: CollisionMode) -> Self {
-        match &mode {
-            CollisionMode::NonPlatform => { self.is_platform = false; }
-            CollisionMode::Surface | CollisionMode::Solid(_) => { self.is_platform = true; }
-        }
-        self.collision_mode = mode;
-        self
-    }
-
-    pub fn highlight(mut self, effect: HighlightEffect) -> Self {
-        self.highlight = Some(effect);
-        self
-    }
-
-    pub fn glow(mut self, config: GlowConfig) -> Self {
-        let mut effect = self.highlight.take().unwrap_or_default();
-        effect.glow = Some(config);
-        self.highlight = Some(effect);  
-        self
-    }
-
-    pub fn tint(mut self, color: Color) -> Self {
-        let mut effect = self.highlight.take().unwrap_or_default();
-        effect.tint = Some(color);
-        self.highlight = Some(effect);  
-        self
-    }
-
-    pub fn build(self, _ctx: &mut Context) -> GameObject {
-        self.finish()
-    }
-
-    pub fn finish(self) -> GameObject {
-        let size = self.size;
-        let highlight = self.highlight;
-        let mut obj = GameObject {
-            layout:          prism::layout::Stack::default(),
-            id:              self.id,
-            tags:            self.tags,
-            drawable:        self.image.map(|img| Box::new(img) as Box<dyn Drawable>),
-            animated_sprite: None,
-            size,
-            position:        self.position,
-            momentum:        self.momentum,
-            resistance:      self.resistance,
-            gravity:         self.gravity,
-            scaled_size:     Cell::new(size),
-            is_platform:     self.is_platform,
-            visible:         true,
-            layer:           self.layer,
-            rotation:        self.rotation,
-            slope:           self.slope,
-            one_way:         self.one_way,
-            surface_velocity: self.surface_velocity,
-            rotation_momentum: 0.0,
-            rotation_resistance: self.rotation_resistance,
-            surface_normal:  self.surface_normal,
-            collision_mode:  self.collision_mode,
-            highlight:       None,
-            glow_drawable:   None,
-            tint_drawable:   None,
-            grounded:        false,
-            text_spec:       None,
-            last_text_scale: Cell::new(0.0),
-            image_path:      self.image_path,
-            image_mtime:     self.image_mtime,
-            animation_path:  None,
-            animation_mtime: None,
-        };
-        if let Some(effect) = highlight {
-            obj.set_highlight(effect);
-        }
-        obj
     }
 }
