@@ -13,7 +13,10 @@ src/
     mod.rs                  re-exports Canvas, CanvasMode, CanvasLayout
     core.rs                 Canvas struct, CanvasMode enum, CanvasLayout struct
     actions.rs              Canvas::new, run(), object management, vars, pause
+    conditions.rs           evaluate_condition(), typed var getters/modifiers  // NEW
+    helpers.rs              tag queries, object pool, image cache, orbit math  // NEW
     physics.rs              collision detection/resolution, object update loop
+    physics_bridge.rs       Crystalline physics bridge — public Canvas API     // NEW
     events.rs               OnEvent impl, tick loop
     watch.rs                watch_file, watch_source
     location.rs             Location::resolve_position
@@ -21,14 +24,18 @@ src/
   types/
     mod.rs                  re-exports everything flat (no logic)
     targeting.rs            Target, Location, Anchor
-    collision.rs            CollisionMode, CollisionShape
+    collision.rs            CollisionMode, CollisionShape, collision_layers    // UPDATED
     effects.rs              GlowConfig, HighlightEffect
     input_types.rs          MouseButton, ScrollAxis
     condition.rs            Condition, ConditionOps
     action.rs               Action enum + all builder methods
     event.rs                GameEvent enum
 
-  object.rs                 GameObject, GameObjectBuilder
+  object/                   // UPDATED — was object.rs, now a directory
+    mod.rs                  GameObject struct, methods, legacy constructors
+    builder.rs              GameObjectBuilder + all builder methods
+    geometry.rs             boundary/anchor/slope/clip geometry helpers
+
   sprite.rs                 AnimatedSprite, image helpers
   value.rs                  Value, Expr, MathOp, CompOp
   store.rs                  ObjectStore
@@ -41,6 +48,17 @@ src/
   lerp.rs                   Lerp
   expr.rs                   parse_condition, parse_action
   file_watcher.rs           Shared<T>, SourceSettings, FromSource, FileWatcher
+
+  crystalline/              // NEW — physics solver + particle system
+    mod.rs                  re-exports for convenience
+    types.rs                PhysicsMaterial, PhysicsConfig, PhysicsQuality, PhysicsBody
+    broadphase.rs           Aabb, AabbPairFinder (speculative broadphase)
+    contacts.rs             contact resolution (internal)
+    solver.rs               CrystallinePhysics solver, SleepState
+    particles/
+      mod.rs                re-exports
+      types.rs              Emitter, EmitterBuilder, Particle, CollisionResponse
+      system.rs             ParticleSystem, ParticleState, ParticleStepResult
 
 IMPORT RULES
   Files inside src/types/ reference siblings via super::
@@ -187,6 +205,139 @@ Canvas::watch_source<T>(path: impl Into<String>, target: Shared<T>)
     if settings.changed() { rebuild_ui(cv, &settings.get()); }
 
 --------------------------------------------------------------------------------
+  CANVAS — Tag Queries  (canvas/helpers.rs)                              // NEW
+--------------------------------------------------------------------------------
+
+Canvas::get_names_by_tag(tag: &str) -> Vec<String>                       // NEW
+  Return names of all objects with a given tag.
+
+Canvas::count_by_tag(tag: &str) -> usize                                 // NEW
+  Count objects with a tag.
+
+Canvas::has_tag(tag: &str) -> bool                                       // NEW
+  Check if any object with this tag exists.
+
+--------------------------------------------------------------------------------
+  CANVAS — Object Pool  (canvas/helpers.rs)                              // NEW
+--------------------------------------------------------------------------------
+
+Canvas::create_pool(pool_tag: &str, template: GameObject, count: usize)  // NEW
+  Pre-spawn `count` hidden copies of a template, tagged for pool reuse.
+
+Canvas::pool_acquire(pool_tag: &str, position: (f32,f32)) -> Option<String>  // NEW
+  Activate one object from pool: shows it, resets position/momentum.
+  Returns its name, or None if pool exhausted.
+
+Canvas::pool_release(name: &str)                                         // NEW
+  Return an object to pool: hides it, zeros momentum.
+
+Canvas::pool_release_all(pool_tag: &str)                                 // NEW
+  Release all active objects in a pool.
+
+Canvas::pool_available(pool_tag: &str) -> usize                          // NEW
+  How many pool objects are free.
+
+Canvas::pool_active(pool_tag: &str) -> usize                             // NEW
+  How many pool objects are currently in use.
+
+--------------------------------------------------------------------------------
+  CANVAS — Image Cache  (canvas/helpers.rs)                              // NEW
+--------------------------------------------------------------------------------
+
+Canvas::load_image_cached(path: &str) -> Image                           // NEW
+  Load an image, caching by path. Subsequent calls return a clone.
+
+Canvas::load_image_sized_cached(path: &str, w: f32, h: f32) -> Image    // NEW
+  Load a sized image, caching by path+dimensions.
+
+Canvas::clear_image_cache()                                              // NEW
+  Clear the entire image cache.
+
+--------------------------------------------------------------------------------
+  CANVAS — Crystalline Physics Bridge  (canvas/physics_bridge.rs)        // NEW
+--------------------------------------------------------------------------------
+
+Canvas::enable_crystalline()                                             // NEW
+  Opt-in to Crystalline physics with default config. Call once.
+  After this, tick loop routes through Crystalline instead of legacy.
+
+Canvas::enable_crystalline_with(config: PhysicsConfig)                   // NEW
+  Opt-in with a custom PhysicsConfig.
+
+Canvas::disable_crystalline()                                            // NEW
+  Disable Crystalline and return to the legacy physics path.
+
+Canvas::has_crystalline() -> bool                                        // NEW
+  Returns true if Crystalline is currently enabled.
+
+Canvas::set_physics_quality(quality: PhysicsQuality)                     // NEW
+  Apply a quality preset (adjusts config substeps + iterations).
+
+Canvas::crystalline_solver() -> Option<&CrystallinePhysics>             // NEW
+  Direct read access to the solver (advanced).
+
+Canvas::crystalline_solver_mut() -> Option<&mut CrystallinePhysics>     // NEW
+  Mutable access to the solver (advanced).
+
+Canvas::apply_physics_force(name: &str, fx: f32, fy: f32)               // NEW
+  Queue a continuous force on a body (applied over timestep, scaled by dt).
+
+Canvas::apply_physics_impulse(name: &str, ix: f32, iy: f32)             // NEW
+  Queue an instantaneous impulse on a body.
+
+Canvas::wake_body(name: &str)                                            // NEW
+  Wake a sleeping body.
+
+Canvas::is_body_sleeping(name: &str) -> bool                             // NEW
+  Check if a body is currently sleeping.
+
+Canvas::get_velocity(name: &str) -> Option<(f32, f32)>                  // NEW
+  Get an object's current velocity (momentum).
+
+Canvas::get_speed(name: &str) -> Option<f32>                            // NEW
+  Get an object's scalar speed (magnitude of velocity).
+
+Canvas::is_body_grounded(name: &str) -> bool                            // NEW
+  Check if a body is grounded (resting on a platform).
+
+Canvas::bodies_in_radius(pos: (f32,f32), radius: f32) -> Vec<String>   // NEW
+  Return names of all bodies whose center is within radius of pos.
+
+Canvas::apply_radial_force(center: (f32,f32), radius: f32, force: f32) // NEW
+  Apply a radial force pushing objects away from center (falloff by distance).
+
+Canvas::apply_radial_impulse(center: (f32,f32), radius: f32, impulse: f32)  // NEW
+  Apply a radial impulse (instant, for explosions).
+
+Canvas::set_gravity_scale(scale: f32)                                   // NEW
+  Set world gravity scale (multiplicative) on the Crystalline solver.
+
+Canvas::get_gravity_scale() -> f32                                      // NEW
+  Get the current gravity scale (1.0 if Crystalline not enabled).
+
+Canvas::set_material(name: &str, mat: PhysicsMaterial)                  // NEW
+  Set a game object's physics material by name.
+
+Canvas::add_emitter(emitter: Emitter)                                   // NEW
+  Add an emitter to the particle system.
+
+Canvas::remove_emitter(name: &str)                                      // NEW
+  Remove a named emitter.
+
+Canvas::attach_emitter_to(emitter_name: &str, object_name: &str)       // NEW
+  Attach an emitter to a game object so its origin follows each frame.
+
+Canvas::particle_positions() -> &[ParticleState]                        // NEW
+  Returns particle positions from the last step (for rendering).
+
+Canvas::particle_system_mut() -> Option<&mut ParticleSystem>            // NEW
+  Mutable access to the particle system (advanced).
+
+Canvas::spawn_particle_burst(emitter: &Emitter, count: usize)          // NEW
+  One-shot burst of particles from an emitter definition.
+  Does NOT add a persistent emitter — particles dissipate on their own.
+
+--------------------------------------------------------------------------------
   CANVAS — Internal (pub(crate)) — called automatically each tick
 --------------------------------------------------------------------------------
 
@@ -200,6 +351,12 @@ Canvas::evaluate_condition(condition: &Condition) -> bool
 Canvas::trigger_collision_events(idx: usize)
 Canvas::trigger_boundary_collision_events(idx: usize)
 Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)
+Canvas::run_crystalline_step(delta_time: f32)                            // NEW
+Canvas::rebuild_particle_visuals()                                       // NEW
+Canvas::apply_directional_gravity()                                      // NEW
+Canvas::handle_planet_landings()                                         // NEW
+Canvas::apply_auto_align()                                               // NEW
+Canvas::inject_planet_gravity()                                          // NEW
 
 --------------------------------------------------------------------------------
   MODULE: CanvasMode  (canvas/core.rs)
@@ -284,6 +441,19 @@ CollisionMode  (enum, Debug, Clone)
   CollisionMode::solid() -> CollisionMode
   CollisionMode::solid_circle(radius: f32) -> CollisionMode
 
+collision_layers  (module, pub constants)                                // NEW
+  NONE:       u32 = 0                                                    // NEW
+  DEFAULT:    u32 = 1 << 0                                               // NEW
+  PLAYER:     u32 = 1 << 1                                               // NEW
+  ENEMY:      u32 = 1 << 2                                               // NEW
+  PROJECTILE: u32 = 1 << 3                                               // NEW
+  PICKUP:     u32 = 1 << 4                                               // NEW
+  TRIGGER:    u32 = 1 << 5                                               // NEW
+  TERRAIN:    u32 = 1 << 6                                               // NEW
+  PARTICLE:   u32 = 1 << 7                                               // NEW
+  ALL:        u32 = u32::MAX                                             // NEW
+  Two non-platform bodies only interact if layer_a & layer_b != 0.
+
 --------------------------------------------------------------------------------
   MODULE: GlowConfig / HighlightEffect  (types/effects.rs)
 --------------------------------------------------------------------------------
@@ -321,6 +491,14 @@ Condition  (enum, Debug, Clone)
   Grounded(Target)
   Expr(String)          parsed lazily at runtime; use expr_checked to validate
   HasTag(Target, String)
+  IsSleeping(Target)                                                     // NEW
+  IsMoving(Target)                                                       // NEW
+  SpeedAbove(Target, f32)                                                // NEW
+  SpeedBelow(Target, f32)                                                // NEW
+  CrystallineEnabled                                                     // NEW
+  EmitterActive(String)                                                  // NEW
+  OnPlanet(Target, Target)       object within planet surface radius     // NEW
+  InGravityField(Target, Target) object within 3× planet radius          // NEW
 
   Condition::expr(s: impl Into<String>) -> Condition
   Condition::expr_checked(s: impl Into<String>) -> Result<Condition, String>
@@ -372,6 +550,55 @@ Action  (enum, Clone, Debug)
   SetTint          { target: Target, color: Color }
   ClearTint        { target: Target }
 
+  // -- Crystalline material actions ---                                 // NEW
+  SetMaterial      { target: Target, material: PhysicsMaterial }         // NEW
+  SetElasticity    { target: Target, value: f32 }                        // NEW
+  SetFriction      { target: Target, value: f32 }                        // NEW
+  SetDensity       { target: Target, value: f32 }                        // NEW
+
+  // -- Forces / impulses ---                                            // NEW
+  ApplyForce       { target: Target, fx: f32, fy: f32 }                 // NEW
+  ApplyImpulse     { target: Target, ix: f32, iy: f32 }                 // NEW
+
+  // -- Position / camera ---                                            // NEW
+  SetPosition      { target: Target, x: f32, y: f32 }                   // NEW
+  SetCameraRelative { target: Target, enabled: bool }                    // NEW
+
+  // -- Body state ---                                                   // NEW
+  WakeBody         { target: Target }                                    // NEW
+  FreezeBody       { target: Target }                                    // NEW
+  UnfreezeBody     { target: Target }                                    // NEW
+
+  // -- Per-body tuning ---                                              // NEW
+  SetCollisionLayer { target: Target, layer: u32 }                       // NEW
+
+  // -- Global physics ---                                               // NEW
+  SetPhysicsQuality { quality: PhysicsQuality }                          // NEW
+  EnableCrystalline                                                      // NEW
+  DisableCrystalline                                                     // NEW
+
+  // -- Particle lifecycle ---                                           // NEW
+  SpawnEmitter     { emitter: Emitter }                                  // NEW
+  RemoveEmitter    { name: String }                                      // NEW
+  AttachEmitter    { emitter_name: String, target: Target,               // NEW
+                     location: Option<Location> }
+  DetachEmitter    { emitter_name: String }                              // NEW
+
+  // -- Emitter modification ---                                         // NEW
+  SetEmitterRate          { name: String, value: f32 }                   // NEW
+  SetEmitterLifetime      { name: String, value: f32 }                   // NEW
+  SetEmitterVelocity      { name: String, value: (f32, f32) }           // NEW
+  SetEmitterSpread        { name: String, value: (f32, f32) }           // NEW
+  SetEmitterSize          { name: String, value: f32 }                   // NEW
+  SetEmitterColor         { name: String, value: (u8, u8, u8, u8) }     // NEW
+  SetEmitterGravityScale  { name: String, value: f32 }                   // NEW
+  SetEmitterCollision     { name: String, value: CollisionResponse }     // NEW
+
+  // -- Planet gravity actions ---                                       // NEW
+  SetGravityStrength { target: Target, value: f32 }                      // NEW
+  SetPlanetRadius    { target: Target, value: f32 }                      // NEW
+  SetGravityTarget   { target: Target, tag: String }                     // NEW
+
 Action builder methods:
   Action::expr(s)
   Action::expr_checked(s) -> Result<Action, String>
@@ -401,6 +628,35 @@ Action builder methods:
   Action::set_collision_mode(target, mode)
   Action::set_glow(target, color, width) / clear_glow(target)
   Action::set_tint(target, color) / clear_tint(target)
+
+  // -- Crystalline builder methods --                                   // NEW
+  Action::set_material(target, material)                                 // NEW
+  Action::set_elasticity(target, value)                                  // NEW
+  Action::set_friction(target, value)                                    // NEW
+  Action::set_density(target, value)                                     // NEW
+  Action::apply_force(target, fx, fy)                                    // NEW
+  Action::apply_impulse(target, ix, iy)                                  // NEW
+  Action::set_position(target, x, y)                                     // NEW
+  Action::set_camera_relative(target, enabled)                           // NEW
+  Action::wake_body(target)                                              // NEW
+  Action::freeze_body(target) / unfreeze_body(target)                    // NEW
+  Action::set_collision_layer(target, layer)                              // NEW
+  Action::enable_crystalline() / disable_crystalline()                   // NEW
+  Action::spawn_emitter(emitter) / remove_emitter(name)                  // NEW
+  Action::attach_emitter(name, target)                                   // NEW
+  Action::attach_emitter_at(name, target, location)                      // NEW
+  Action::detach_emitter(name)                                           // NEW
+  Action::set_emitter_rate(name, value)                                  // NEW
+  Action::set_emitter_lifetime(name, value)                              // NEW
+  Action::set_emitter_velocity(name, vx, vy)                             // NEW
+  Action::set_emitter_spread(name, sx, sy)                               // NEW
+  Action::set_emitter_size(name, value)                                  // NEW
+  Action::set_emitter_color(name, r, g, b, a)                            // NEW
+  Action::set_emitter_gravity_scale(name, value)                         // NEW
+  Action::set_emitter_collision(name, value)                              // NEW
+  Action::set_gravity_strength(target, value)                            // NEW
+  Action::set_planet_radius(target, value)                               // NEW
+  Action::set_gravity_target(target, tag)                                // NEW
 
 --------------------------------------------------------------------------------
   MODULE: GameEvent  (types/event.rs)
@@ -439,7 +695,7 @@ GameEvent  (enum, Clone, Debug)
     .custom_name() -> Option<&str> Some for Custom variant, else None
 
 --------------------------------------------------------------------------------
-  MODULE: GameObject / GameObjectBuilder  (object.rs)
+  MODULE: GameObject / GameObjectBuilder  (object/)                      // UPDATED
 --------------------------------------------------------------------------------
 
 GameObject::build(id: impl Into<String>) -> GameObjectBuilder
@@ -469,8 +725,40 @@ Builder methods (all return Self):
   .highlight(effect: HighlightEffect)
   .glow(config: GlowConfig)
   .tint(color: Color)
+  .material(mat: PhysicsMaterial)                                        // NEW
+  .collision_layer(layer: u32)                                           // NEW
+  .collision_mask(mask: u32)                                             // NEW
+  .clip()                            enable child clipping               // NEW
+  .clip_origin(x: f32, y: f32)      fixed clip origin                   // NEW
+  .planet(radius: f32)              sets planet_radius, solid_circle,    // NEW
+                                     is_platform=true
+  .gravity_target(tag: impl Into<String>)                                // NEW
+  .gravity_strength(strength: f32)                                       // NEW
+  .auto_align()                      enable planet surface alignment     // NEW
+  .auto_align_speed(speed: f32)      rotation lerp speed (default 3.0)  // NEW
+  .auto_align_threshold(threshold: f32)  degrees (default 45.0)         // NEW
+  .gravity_well(radius: f32, strength: f32)  planet_radius + non-solid  // NEW
+  .elasticity(val: f32) / .friction(val: f32) / .density(val: f32)      // NEW
+  .bouncy()              material preset: PhysicsMaterial::bouncy()      // NEW
+  .slippery()            material preset: PhysicsMaterial::ice()         // NEW
+  .heavy()               material preset: PhysicsMaterial::metal()       // NEW
+  .light()               material preset: PhysicsMaterial::feather()     // NEW
+  .rubber()              material preset: PhysicsMaterial::rubber()      // NEW
+  .static_object()       gravity(0).resistance(0,0) — immovable         // NEW
+  .player_layer()        collision_layer(PLAYER), mask(ALL)              // NEW
+  .enemy_layer()         collision_layer(ENEMY), mask(PLAYER|PROJ|TERR) // NEW
+  .projectile_layer()    collision_layer(PROJECTILE), mask(ENEMY|TERR)  // NEW
+  .no_collision()        collision_layer(NONE), mask(NONE)               // NEW
   .finish() -> GameObject           no Context required
   .build(ctx: &mut Context) -> GameObject   alias for finish()
+
+Factory methods (return GameObjectBuilder):                               // NEW
+  GameObject::platform(id, w, h, pos: (f32,f32))                         // NEW
+    Pre-configured: platform + static + TERRAIN layer.
+  GameObject::trigger_zone(id, w, h, pos: (f32,f32))                     // NEW
+    Pre-configured: no_collision + TRIGGER layer.
+  GameObject::gravity_well(id, radius, strength, pos, tag)               // NEW
+    Pre-configured: gravity_well + static + tagged.
 
 GameObject  (struct, Clone, Debug)
 
@@ -496,6 +784,37 @@ GameObject  (struct, Clone, Debug)
     collision_mode:      CollisionMode
     highlight:           Option<HighlightEffect>
     grounded:            bool
+    scaled_size:         Cell<(f32, f32)>                                // NEW
+    material:            PhysicsMaterial                                  // NEW
+    collision_layer:     u32                                              // NEW
+    collision_mask:      u32                                              // NEW
+    clipped:             bool                                             // NEW
+    clip_origin:         Option<(f32, f32)>                              // NEW
+    planet_radius:       Option<f32>                                      // NEW
+    gravity_target:      Option<String>                                   // NEW
+    gravity_strength:    f32              default 1.0                     // NEW
+    auto_align:          bool                                             // NEW
+    auto_align_speed:    f32              default 3.0                     // NEW
+    auto_align_threshold: f32            default 45.0 degrees            // NEW
+
+  Constructors (legacy):                                                  // NEW
+    GameObject::new(ctx, id, drawable, size: f32, position, tags,         // NEW
+                    momentum, resistance, gravity) -> Self
+      Square object (size × size). Prefer build().
+    GameObject::new_rect(ctx, id, drawable, size: (f32,f32), position,    // NEW
+                         tags, momentum, resistance, gravity) -> Self
+      Rectangular object. Prefer build().
+
+  Chainable transforms (consume and return Self):                         // NEW
+    .with_animation(animated_sprite: AnimatedSprite) -> Self              // NEW
+    .with_image(image: Image) -> Self                                     // NEW
+    .as_platform() -> Self                   sets is_platform = true      // NEW
+    .with_tag(tag: impl Into<String>) -> Self                             // NEW
+    .with_tags(tags: Vec<String>) -> Self                                 // NEW
+    .with_gravity(gravity: f32) -> Self                                   // NEW
+    .with_momentum(momentum: (f32,f32)) -> Self                           // NEW
+    .with_resistance(resistance: (f32,f32)) -> Self                       // NEW
+    .clip() -> Self                          sets clipped = true          // NEW
 
   Methods:
     .set_gravity(gravity: f32)
@@ -506,6 +825,8 @@ GameObject  (struct, Clone, Debug)
     .set_glow(config: GlowConfig) / .clear_glow()
     .set_tint(color: Color) / .clear_tint()
     .set_highlight(effect: HighlightEffect) / .clear_highlight()
+    .set_clip(clip: bool)                                                // NEW
+    .set_clip_origin(origin: Option<(f32, f32)>)                         // NEW
     .sync_rotation_normal()
     .slope_surface_y(world_x: f32) -> f32
     .rotation_from_slope() -> f32
@@ -599,6 +920,8 @@ with_tint(image: &Image, color: Color) -> Image
 planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size: f32) -> Image
 glow_ring(w: f32, h: f32, ring_width: f32, corner_radius: f32, color: Color) -> Image
 tint_overlay(w: f32, h: f32, color: Color) -> Image
+star_field(width: u32, height: u32, star_count: u32, seed: u64) -> Image // NEW
+  Procedurally generates a starfield image with deterministic placement.
 
 --------------------------------------------------------------------------------
   MODULE: Value / Expr / MathOp / CompOp  (value.rs)
@@ -953,5 +1276,251 @@ Entropy::from_time() -> Entropy
   .position_in(x: f32, y: f32, w: f32, h: f32) -> (f32, f32)
 
 ================================================================================
+  END OF CORE API REFERENCE
+================================================================================
+
+================================================================================
+  MODULE: Crystalline Physics  (crystalline/)                            // NEW
+================================================================================
+
+--------------------------------------------------------------------------------
+  PhysicsMaterial  (crystalline/types.rs)                                // NEW
+--------------------------------------------------------------------------------
+
+PhysicsMaterial  (struct, Clone, Copy, Debug)                            // NEW
+  Fields:
+    elasticity: f32   0.0 = no bounce, 1.0 = full bounce (default 0.0)
+    friction:   f32   surface friction coefficient (default 0.5)
+    density:    f32   mass = density × area (default 1.0)
+
+  PhysicsMaterial::default() -> Self   { 0.0, 0.5, 1.0 }
+
+  Presets (all return Self):
+    PhysicsMaterial::rubber()    { 0.8, 0.9, 1.1 }
+    PhysicsMaterial::ice()       { 0.1, 0.05, 0.9 }
+    PhysicsMaterial::metal()     { 0.3, 0.4, 7.8 }
+    PhysicsMaterial::wood()      { 0.4, 0.6, 0.6 }
+    PhysicsMaterial::stone()     { 0.2, 0.7, 2.4 }
+    PhysicsMaterial::bouncy()    { 1.0, 0.3, 0.5 }
+    PhysicsMaterial::sticky()    { 0.0, 1.0, 1.0 }
+    PhysicsMaterial::glass()     { 0.5, 0.2, 2.5 }
+    PhysicsMaterial::feather()   { 0.3, 0.1, 0.01 }
+
+--------------------------------------------------------------------------------
+  PhysicsConfig  (crystalline/types.rs)                                  // NEW
+--------------------------------------------------------------------------------
+
+PhysicsConfig  (struct, Clone, Debug)                                    // NEW
+  Fields:
+    fixed_dt:            f32   substep size (default 1/240)
+    max_substeps:        u32   cap per frame (default 8)
+    position_iterations: u32   collision solve passes (default 6)
+    gravity_scale:       f32   world gravity multiplier (default 1.0)
+    particle_gravity:    f32   particle gravity in Quartz scale (default 0.5)
+    particle_max_speed:  f32   particle speed cap in px/s (default 1200.0)
+
+  Presets (all return Self):
+    PhysicsConfig::platformer()   default values, tight collisions
+    PhysicsConfig::floaty()       gravity_scale 0.3, looser feel
+    PhysicsConfig::realistic()    1/480 dt, 16 substeps, 10 iterations
+    PhysicsConfig::arcade()       1/120 dt, 4 substeps, gravity 1.2
+
+--------------------------------------------------------------------------------
+  PhysicsQuality  (crystalline/types.rs)                                 // NEW
+--------------------------------------------------------------------------------
+
+PhysicsQuality  (enum, Clone, Copy, Debug, PartialEq, Eq)               // NEW
+  Low       fewer substeps/iterations for performance
+  Medium    balanced
+  High      more substeps/iterations for accuracy
+
+--------------------------------------------------------------------------------
+  CrystallinePhysics  (crystalline/solver.rs)                            // NEW
+--------------------------------------------------------------------------------
+
+CrystallinePhysics  (struct, Clone)                                      // NEW
+  The deterministic physics solver. Normally accessed via Canvas bridge
+  methods (enable_crystalline, apply_physics_force, etc.). Direct access
+  available through canvas.crystalline_solver() / _mut().
+
+  CrystallinePhysics::new() -> Self                                      // NEW
+    Default config.
+
+  CrystallinePhysics::with_config(config: PhysicsConfig) -> Self         // NEW
+    Custom config.
+
+  Public field:
+    config: PhysicsConfig    can be read/mutated directly
+
+  .apply_force(body_id: usize, fx: f32, fy: f32)                        // NEW
+    Queue a continuous force (scaled by dt each substep). Wakes the body.
+
+  .apply_impulse(body_id: usize, ix: f32, iy: f32)                      // NEW
+    Queue an instant impulse (added to momentum once). Wakes the body.
+
+  .wake(body_id: usize)                                                  // NEW
+    Wake a sleeping body.
+
+  .is_sleeping(body_id: usize) -> bool                                   // NEW
+    Check if a body is currently sleeping.
+
+  .step(delta: f32, bodies: &[PhysicsBody]) -> PhysicsStepResult         // NEW
+    Main entry — accumulates delta, runs fixed-dt substeps, returns
+    BodyUpdate vec and collision pairs. Called automatically by Canvas
+    when Crystalline is enabled.
+
+SleepState  (struct, Clone, Debug)                                       // NEW
+  Per-body sleeping tracker.
+  Fields: sleeping: bool, frames_at_rest: u16
+
+PhysicsBody  (struct, Clone, Debug)                                      // NEW
+  Firewall input struct — Canvas converts GameObjects to PhysicsBodies
+  before passing to the solver. Not constructed directly by users.
+  Fields mirror GameObject physics-relevant subset.
+
+PhysicsStepResult  (struct)                                              // NEW
+  Output from CrystallinePhysics::step().
+  Fields: body_updates: Vec<BodyUpdate>, collision_pairs: Vec<(usize, usize)>
+
+BodyUpdate  (struct)                                                     // NEW
+  Fields: id: usize, position: (f32,f32), momentum: (f32,f32),
+          rotation: f32, rotation_momentum: f32, grounded: bool
+
+--------------------------------------------------------------------------------
+  Particle  (crystalline/particles/types.rs)                             // NEW
+--------------------------------------------------------------------------------
+
+Particle  (struct, Clone, Debug)                                         // NEW
+  Fields:
+    position:           (f32, f32)
+    velocity:           (f32, f32)
+    life:               f32          remaining lifetime
+    max_life:           f32          initial lifetime
+    size:               f32
+    color:              (u8, u8, u8, u8)
+    gravity_scale:      f32          per-particle gravity multiplier
+    rotation:           f32
+    collision_response: CollisionResponse
+
+CollisionResponse  (enum, Clone, Debug, Default=None)                    // NEW
+  None                         particles ignore collisions
+  Bounce { elasticity: f32 }   bounce off platforms
+  Die                          destroy on contact
+
+--------------------------------------------------------------------------------
+  Emitter  (crystalline/particles/types.rs)                              // NEW
+--------------------------------------------------------------------------------
+
+Emitter  (struct, Clone, Debug)                                          // NEW
+  Defines a continuous particle source. Add to Canvas via add_emitter().
+
+  Fields:
+    name:               String
+    origin:             (f32, f32)
+    rate:               f32          particles per second
+    lifetime:           f32          seconds each particle lives
+    velocity_base:      (f32, f32)   base velocity
+    velocity_spread:    (f32, f32)   random spread range
+    size:               f32
+    color:              (u8, u8, u8, u8)
+    gravity_scale:      f32          per-particle gravity multiplier
+    collision_response: CollisionResponse
+    rotation:           f32          degrees applied to velocity at emit time
+
+  .named(name: impl Into<String>) -> Self                                // NEW
+    Rename an emitter (for use after creating from a preset).
+
+  Presets (all return Self):
+    Emitter::fire(pos)                                                   // NEW
+    Emitter::smoke(pos)                                                  // NEW
+    Emitter::sparks(pos)                                                 // NEW
+    Emitter::rain(canvas_width)                                          // NEW
+    Emitter::snow(canvas_width)                                          // NEW
+    Emitter::dust(pos)                                                   // NEW
+    Emitter::explosion(pos)                                              // NEW
+    Emitter::trail(color: (u8,u8,u8,u8))                                // NEW
+    Emitter::confetti(pos)                                               // NEW
+    Emitter::bubbles(pos)                                                // NEW
+    Emitter::thruster_exhaust(pos)                                       // NEW
+    Emitter::reentry_sparks(pos)                                         // NEW
+    Emitter::asteroid_debris(pos)                                        // NEW
+    Emitter::solar_wind(canvas_width)                                    // NEW
+    Emitter::damage_burst(pos)                                           // NEW
+
+--------------------------------------------------------------------------------
+  EmitterBuilder  (crystalline/particles/types.rs)                       // NEW
+--------------------------------------------------------------------------------
+
+EmitterBuilder  (struct)                                                 // NEW
+  Fluent builder for custom emitters.
+
+  EmitterBuilder::new(name: impl Into<String>) -> Self                   // NEW
+    Creates builder with sensible defaults (white, rate 30, life 1.0).
+
+  Builder methods (all return Self):
+    .origin(x: f32, y: f32)                                              // NEW
+    .rate(r: f32)                                                        // NEW
+    .lifetime(l: f32)                                                    // NEW
+    .velocity(vx: f32, vy: f32)                                          // NEW
+    .spread(sx: f32, sy: f32)                                            // NEW
+    .size(s: f32)                                                        // NEW
+    .color(r: u8, g: u8, b: u8, a: u8)                                  // NEW
+    .gravity_scale(g: f32)                                               // NEW
+    .collision(resp: CollisionResponse)                                  // NEW
+    .build() -> Emitter                                                  // NEW
+
+--------------------------------------------------------------------------------
+  ParticleSystem  (crystalline/particles/system.rs)                      // NEW
+--------------------------------------------------------------------------------
+
+ParticleSystem  (struct, Clone)                                          // NEW
+  Manages all particles and emitters. Normally accessed via Canvas
+  bridge methods (add_emitter, spawn_particle_burst, etc.). Direct
+  access available through canvas.particle_system_mut().
+
+  ParticleSystem::new(max_particles: usize) -> Self                      // NEW
+    Create with a particle count cap.
+
+  .with_config(config: PhysicsConfig) -> Self                            // NEW
+    Set physics config (builder style, consumes self).
+
+  .set_config(&mut self, config: PhysicsConfig)                          // NEW
+    Update config on an existing system.
+
+  .add_emitter(emitter: Emitter)                                         // NEW
+  .remove_emitter(name: &str)                                            // NEW
+  .has_emitter(name: &str) -> bool                                       // NEW
+
+  .spawn_burst(position: (f32,f32), count: usize, template: Particle)   // NEW
+    Spawn particles at position using a template.
+
+  .spawn_burst_from_emitter(emitter: &Emitter, count: usize)            // NEW
+    Spawn particles using an emitter's spread/velocity parameters.
+
+  .step(dt: f32, broadphase: Option<&AabbPairFinder>)                    // NEW
+    -> ParticleStepResult
+    Advance particles one frame. Pass None for broadphase to skip
+    particle-platform collision.
+
+ParticleState  (struct, Clone)                                           // NEW
+  Render-ready output. Fields: position, size, color, rotation
+
+ParticleStepResult  (struct)                                             // NEW
+  Output from step(). Field: particles: Vec<ParticleState>
+
+--------------------------------------------------------------------------------
+  Planet Gravity Free Functions  (canvas/helpers.rs)                     // NEW
+--------------------------------------------------------------------------------
+
+orbit_speed(gravity_strength: f32, planet_radius: f32,                   // NEW
+            orbit_dist: f32) -> f32
+  Approximate orbital speed for a body at orbit_dist above a planet.
+
+escape_speed(gravity_strength: f32, planet_radius: f32,                  // NEW
+             dist: f32) -> f32
+  Approximate escape speed at dist from a planet surface.
+
+================================================================================
   END OF API REFERENCE
 ================================================================================
+
