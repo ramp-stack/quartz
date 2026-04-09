@@ -13,8 +13,6 @@ use crate::types::{CollisionMode, GlowConfig, HighlightEffect};
 use crate::crystalline::PhysicsMaterial;
 use std::cell::Cell;
 
-/// Reads and clears the thread-local path set by `load_image` / `load_animation`,
-/// and records the file's current mtime alongside it.
 pub(super) fn capture_asset_path() -> (Option<String>, Option<std::time::SystemTime>) {
     let path = LAST_ASSET_PATH.with(|p| p.borrow_mut().take());
     let mtime = path.as_ref()
@@ -41,7 +39,6 @@ pub struct GameObject {
     pub layer:           Option<u32>,
     pub(crate) text_spec:       Option<TextSpec>,
     pub(crate) last_text_scale: Cell<f32>,
-    // hot-reload tracking — populated automatically when load_image / load_animation is used
     pub(crate) image_path:      Option<String>,
     pub(crate) animation_path:  Option<String>,
     pub(crate) image_mtime:     Option<std::time::SystemTime>,
@@ -61,13 +58,13 @@ pub struct GameObject {
     pub material:            PhysicsMaterial,
     pub collision_layer:     u32,
     pub collision_mask:      u32,
+    pub clipped:             bool,
+    pub clip_origin:         Option<(f32, f32)>,
 
-    // ── Planet gravity fields ──────────────────────────────────────
     pub planet_radius:       Option<f32>,
     pub gravity_target:      Option<String>,
     pub gravity_strength:    f32,
 
-    // ── Auto-align fields ──────────────────────────────────────────
     pub auto_align:           bool,
     pub auto_align_speed:     f32,
     pub auto_align_threshold: f32,
@@ -115,6 +112,14 @@ impl Component for GameObject {
     fn layout(&self) -> &dyn prism::layout::Layout {
         &self.layout
     }
+
+    fn clipped(&self) -> bool {
+        self.clipped
+    }
+
+    fn clip_origin(&self) -> Option<prism::drawable::Offset> {
+        self.clip_origin
+    }
 }
 
 impl GameObject {
@@ -144,6 +149,8 @@ impl GameObject {
             material:      PhysicsMaterial::default(),
             collision_layer: 0,
             collision_mask:  u32::MAX,
+            clipped:         false,
+            clip_origin:     None,
             planet_radius:        None,
             gravity_target:       None,
             gravity_strength:     1.0,
@@ -187,20 +194,22 @@ impl GameObject {
             rotation_momentum:   0.0,
             rotation_resistance: 0.85,
             surface_normal:      (0.0, -1.0),
-            collision_mode:     CollisionMode::Surface,
-            highlight:          None,
-            glow_drawable:      None,
-            tint_drawable:      None,
-            grounded:           false,
-            text_spec:       None,
-            last_text_scale: Cell::new(0.0),
+            collision_mode:      CollisionMode::Surface,
+            highlight:           None,
+            glow_drawable:       None,
+            tint_drawable:       None,
+            grounded:            false,
+            text_spec:           None,
+            last_text_scale:     Cell::new(0.0),
             image_path,
             image_mtime,
-            animation_path:  None,
-            animation_mtime: None,
-            material:        PhysicsMaterial::default(),
-            collision_layer: 0,
-            collision_mask:  u32::MAX,
+            animation_path:      None,
+            animation_mtime:     None,
+            material:            PhysicsMaterial::default(),
+            collision_layer:     0,
+            collision_mask:      u32::MAX,
+            clipped:             false,
+            clip_origin:         None,
             planet_radius:        None,
             gravity_target:       None,
             gravity_strength:     1.0,
@@ -245,19 +254,21 @@ impl GameObject {
             rotation_resistance: 0.85,
             surface_normal:      (0.0, -1.0),
             collision_mode:      CollisionMode::Surface,
-            highlight:          None,
-            glow_drawable:      None,
-            tint_drawable:      None,
-            grounded:           false,
-            text_spec:       None,
-            last_text_scale: Cell::new(0.0),
+            highlight:           None,
+            glow_drawable:       None,
+            tint_drawable:       None,
+            grounded:            false,
+            text_spec:           None,
+            last_text_scale:     Cell::new(0.0),
             image_path,
             image_mtime,
-            animation_path:  None,
-            animation_mtime: None,
-            material:        PhysicsMaterial::default(),
-            collision_layer: 0,
-            collision_mask:  u32::MAX,
+            animation_path:      None,
+            animation_mtime:     None,
+            material:            PhysicsMaterial::default(),
+            collision_layer:     0,
+            collision_mask:      u32::MAX,
+            clipped:             false,
+            clip_origin:         None,
             planet_radius:        None,
             gravity_target:       None,
             gravity_strength:     1.0,
@@ -287,39 +298,13 @@ impl GameObject {
         self
     }
 
-    pub fn as_platform(mut self) -> Self {
-        self.is_platform = true;
-        self
-    }
-
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
-        self.tags.push(tag.into());
-        self
-    }
-
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-        self.tags = tags;
-        self
-    }
-
-    pub fn with_gravity(mut self, gravity: f32) -> Self {
-        self.gravity = gravity;
-        self
-    }
-
-    pub fn with_momentum(mut self, momentum: (f32, f32)) -> Self {
-        self.momentum = momentum;
-        self
-    }
-
-    pub fn with_resistance(mut self, resistance: (f32, f32)) -> Self {
-        self.resistance = resistance;
-        self
-    }
-
-    pub fn set_gravity(&mut self, gravity: f32) {
-        self.gravity = gravity;
-    }
+    pub fn as_platform(mut self) -> Self { self.is_platform = true; self }
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self { self.tags.push(tag.into()); self }
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self { self.tags = tags; self }
+    pub fn with_gravity(mut self, gravity: f32) -> Self { self.gravity = gravity; self }
+    pub fn with_momentum(mut self, momentum: (f32, f32)) -> Self { self.momentum = momentum; self }
+    pub fn with_resistance(mut self, resistance: (f32, f32)) -> Self { self.resistance = resistance; self }
+    pub fn set_gravity(&mut self, gravity: f32) { self.gravity = gravity; }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
         let (path, mtime) = capture_asset_path();
@@ -360,15 +345,12 @@ impl GameObject {
     }
 
     pub fn apply_gravity(&mut self) {
-        if self.gravity_target.is_none() {
-            self.momentum.1 += self.gravity;
-        }
+        if self.gravity_target.is_none() { self.momentum.1 += self.gravity; }
     }
 
     pub fn apply_resistance(&mut self) {
         self.momentum.0 *= self.resistance.0;
         self.momentum.1 *= self.resistance.1;
-
         if self.momentum.0.abs() < 0.001 { self.momentum.0 = 0.0; }
         if self.momentum.1.abs() < 0.001 { self.momentum.1 = 0.0; }
     }
@@ -384,7 +366,7 @@ impl GameObject {
     }
 
     pub fn update_image_shape(&mut self) {
-        let scaled = self.scaled_size.get();
+        let scaled   = self.scaled_size.get();
         let rotation = self.rotation;
 
         let rescale = |img: &mut Image, rot: f32| {
@@ -411,34 +393,23 @@ impl GameObject {
         };
 
         if let Some(drawable) = self.drawable.as_mut() {
-            if let Some(ref mut img) = drawable.downcast_mut::<Image>() {
-                rescale(img, rotation);
-            }
+            if let Some(ref mut img) = drawable.downcast_mut::<Image>() { rescale(img, rotation); }
         }
         if let Some(glow) = self.glow_drawable.as_mut() {
-            if let Some(ref mut img) = glow.downcast_mut::<Image>() {
-                rescale(img, rotation);
-            }
+            if let Some(ref mut img) = glow.downcast_mut::<Image>() { rescale(img, rotation); }
         }
         if let Some(tint) = self.tint_drawable.as_mut() {
-            if let Some(ref mut img) = tint.downcast_mut::<Image>() {
-                rescale(img, rotation);
-            }
+            if let Some(ref mut img) = tint.downcast_mut::<Image>() { rescale(img, rotation); }
         }
     }
 
-    /// Detect the main drawable's shape and return a matching ShapeType
-    /// with the given stroke width and target size.
     fn highlight_shape(&self, stroke: f32, size: (f32, f32)) -> ShapeType {
         if let Some(drawable) = &self.drawable {
             if let Some(img) = drawable.downcast_ref::<Image>() {
                 return match img.shape {
-                    ShapeType::Ellipse(_, _, _) =>
-                        ShapeType::Ellipse(stroke, size, 0.0),
-                    ShapeType::RoundedRectangle(_, _, _, cr) =>
-                        ShapeType::RoundedRectangle(stroke, size, 0.0, cr),
-                    _ =>
-                        ShapeType::Rectangle(stroke, size, 0.0),
+                    ShapeType::Ellipse(_, _, _)             => ShapeType::Ellipse(stroke, size, 0.0),
+                    ShapeType::RoundedRectangle(_, _, _, cr) => ShapeType::RoundedRectangle(stroke, size, 0.0, cr),
+                    _                                        => ShapeType::Rectangle(stroke, size, 0.0),
                 };
             }
         }
@@ -451,29 +422,15 @@ impl GameObject {
             Some(effect) => {
                 self.glow_drawable = effect.glow.as_ref().map(|glow| {
                     let pixel = image::RgbaImage::from_pixel(1, 1, image::Rgba([255,255,255,255])).into();
-                    let img = Image {
-                        shape: self.highlight_shape(glow.width, size),
-                        image: pixel,
-                        color: Some(glow.color),
-                    };
-                    Box::new(img) as Box<dyn Drawable>
+                    Box::new(Image { shape: self.highlight_shape(glow.width, size), image: pixel, color: Some(glow.color) }) as Box<dyn Drawable>
                 });
                 self.tint_drawable = effect.tint.map(|color| {
                     let pixel: std::sync::Arc<image::RgbaImage> = image::RgbaImage::from_pixel(1, 1, image::Rgba([255,255,255,255])).into();
-                    let img = Image {
-                        shape: self.highlight_shape(0.0, size),
-                        image: pixel,
-                        color: Some(color),
-                    };
-                    Box::new(img) as Box<dyn Drawable>
+                    Box::new(Image { shape: self.highlight_shape(0.0, size), image: pixel, color: Some(color) }) as Box<dyn Drawable>
                 });
             }
-            None => {
-                self.glow_drawable = None;
-                self.tint_drawable = None;
-            }
+            None => { self.glow_drawable = None; self.tint_drawable = None; }
         }
-
         self.update_image_shape();
     }
 
@@ -483,43 +440,31 @@ impl GameObject {
         self.highlight = Some(effect);
         self.rebuild_highlight_drawables();
     }
-
     pub fn clear_glow(&mut self) {
         if let Some(effect) = &mut self.highlight {
             effect.glow = None;
-            if effect.tint.is_none() {
-                self.highlight = None;
-            }
+            if effect.tint.is_none() { self.highlight = None; }
         }
         self.rebuild_highlight_drawables();
     }
-
     pub fn set_tint(&mut self, color: Color) {
         let mut effect = self.highlight.take().unwrap_or_default();
         effect.tint = Some(color);
         self.highlight = Some(effect);
         self.rebuild_highlight_drawables();
     }
-
     pub fn clear_tint(&mut self) {
         if let Some(effect) = &mut self.highlight {
             effect.tint = None;
-            if effect.glow.is_none() {
-                self.highlight = None;
-            }
+            if effect.glow.is_none() { self.highlight = None; }
         }
         self.rebuild_highlight_drawables();
     }
-
     pub fn set_highlight(&mut self, effect: HighlightEffect) {
-        if effect.tint.is_none() && effect.glow.is_none() {
-            self.highlight = None;
-        } else {
-            self.highlight = Some(effect);
-        }
+        if effect.tint.is_none() && effect.glow.is_none() { self.highlight = None; }
+        else { self.highlight = Some(effect); }
         self.rebuild_highlight_drawables();
     }
-
     pub fn clear_highlight(&mut self) {
         self.highlight = None;
         self.rebuild_highlight_drawables();
@@ -528,7 +473,6 @@ impl GameObject {
     pub(crate) fn update_text_scale(&mut self, scale: f32) {
         if self.text_spec.is_none() { return; }
         if (self.last_text_scale.get() - scale).abs() < 0.0001 { return; }
-
         if let Some(spec) = &mut self.text_spec {
             let text = spec.build(scale);
             self.drawable = Some(Box::new(text));
@@ -536,13 +480,10 @@ impl GameObject {
         self.last_text_scale.set(scale);
     }
 
-    // ── Hot-reload internals ─────────────────────────────────────────────────
-
     pub(crate) fn hot_reload_image(&mut self, path: &str) {
         let Ok(meta)  = std::fs::metadata(path) else { return };
         let Ok(mtime) = meta.modified()          else { return };
         if Some(mtime) == self.image_mtime { return; }
-
         let img = reload_image_raw(path, self.size);
         self.image_mtime = Some(mtime);
         self.text_spec   = None;
@@ -555,7 +496,6 @@ impl GameObject {
         let Ok(meta)  = std::fs::metadata(path) else { return };
         let Ok(mtime) = meta.modified()          else { return };
         if Some(mtime) == self.animation_mtime { return; }
-
         let fps  = self.animated_sprite.as_ref().map(|s| s.fps()).unwrap_or(12.0);
         let size = self.size;
         match std::fs::read(path) {

@@ -1,5 +1,4 @@
 use crate::types::Anchor;
-
 use super::GameObject;
 
 impl GameObject {
@@ -28,12 +27,8 @@ impl GameObject {
         if self.rotation_momentum == 0.0 { return; }
         self.rotation += self.rotation_momentum;
         self.rotation_momentum *= self.rotation_resistance;
-        if self.rotation_momentum.abs() < 0.01 {
-            self.rotation_momentum = 0.0;
-        }
-        if self.is_platform {
-            self.sync_rotation_normal();
-        }
+        if self.rotation_momentum.abs() < 0.01 { self.rotation_momentum = 0.0; }
+        if self.is_platform { self.sync_rotation_normal(); }
     }
 
     pub fn sync_rotation_normal(&mut self) {
@@ -78,12 +73,25 @@ impl GameObject {
         match self.slope {
             None => (self.position.0, self.position.1, self.size.0, self.size.1),
             Some((left_off, right_off)) => {
-                let left_y = self.position.1 + left_off;
+                let left_y  = self.position.1 + left_off;
                 let right_y = self.position.1 + right_off;
-                let top = left_y.min(right_y);
-                let bottom = left_y.max(right_y) + self.size.1;
+                let top     = left_y.min(right_y);
+                let bottom  = left_y.max(right_y) + self.size.1;
                 (self.position.0, top, self.size.0, bottom - top)
             }
         }
+    }
+
+    pub fn clip(mut self) -> Self {
+        self.clipped = true;
+        self
+    }
+
+    pub fn set_clip(&mut self, clip: bool) {
+        self.clipped = clip;
+    }
+
+    pub fn set_clip_origin(&mut self, origin: Option<(f32, f32)>) {
+        self.clip_origin = origin;
     }
 }
