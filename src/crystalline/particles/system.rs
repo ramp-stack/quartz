@@ -10,6 +10,7 @@ pub struct ParticleState {
     pub size: f32,
     pub color: (u8, u8, u8, u8),
     pub rotation: f32,
+    pub render_layer: i32,
 }
 
 pub struct ParticleStepResult {
@@ -126,6 +127,12 @@ impl ParticleSystem {
         }
     }
 
+    pub fn set_emitter_render_layer(&mut self, name: &str, layer: i32) {
+        if let Some(e) = self.emitters.iter_mut().find(|e| e.name == name) {
+            e.render_layer = layer;
+        }
+    }
+
     pub fn spawn_burst(&mut self, position: (f32, f32), count: usize, template: Particle) {
         let remaining = self.max_particles.saturating_sub(self.particles.len());
         for _ in 0..count.min(remaining) {
@@ -156,6 +163,7 @@ impl ParticleSystem {
                 gravity_scale: emitter.gravity_scale,
                 rotation: 0.0,
                 collision_response: emitter.collision_response.clone(),
+                render_layer: emitter.render_layer,
             });
         }
     }
@@ -202,6 +210,7 @@ impl ParticleSystem {
                     gravity_scale: emitter.gravity_scale,
                     rotation: 0.0,
                     collision_response: emitter.collision_response.clone(),
+                    render_layer: emitter.render_layer,
                 });
             }
         }
@@ -255,6 +264,7 @@ impl ParticleSystem {
                     size: p.size,
                     color: p.color,
                     rotation: p.rotation,
+                    render_layer: p.render_layer,
                 })
                 .collect(),
         }

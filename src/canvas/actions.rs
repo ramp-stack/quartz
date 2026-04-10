@@ -29,10 +29,13 @@ impl Canvas {
             layout: CanvasLayout {
                 offsets:          Vec::new(),
                 particle_offsets: Vec::new(),
+                sorted_offsets:   Vec::new(),
                 canvas_size:      Cell::new(virtual_res),
                 mode,
                 scale:            Cell::new(1.0),
                 safe_area_offset: Cell::new((0.0, 0.0)),
+                zoom:             Cell::new(1.0),
+                sorted_ignore_zoom: Vec::new(),
             },
             store:            ObjectStore::new(),
             input:            InputState::new(),
@@ -51,6 +54,8 @@ impl Canvas {
             particle_images:      Vec::new(),
             image_cache:          HashMap::new(),
             emitter_locations:    HashMap::new(),
+            particle_render_layers: Vec::new(),
+            render_order:         Vec::new(),
         }
     }
 
@@ -75,6 +80,7 @@ impl Canvas {
         let position = obj.position;
         self.layout.offsets.push(position);
         self.store.add(name, obj);
+        self.rebuild_render_order();
     }
 
     pub fn remove_game_object(&mut self, name: &str) {
@@ -88,6 +94,7 @@ impl Canvas {
 
             self.layout.offsets.remove(idx);
             self.store.remove(name);
+            self.rebuild_render_order();
         }
     }
 
@@ -472,6 +479,27 @@ impl Canvas {
             Action::SetEmitterCollision { name, value } => {
                 if let Some(ps) = &mut self.particle_system {
                     ps.set_emitter_collision(&name, value);
+                }
+            }
+            Action::SetEmitterRenderLayer { name, value } => {
+                if let Some(ps) = &mut self.particle_system {
+                    ps.set_emitter_render_layer(&name, value);
+                }
+            }
+            Action::SetRenderLayer { target, layer } => {
+                self.store.apply_to_targets(&target, |obj| obj.layer = layer);
+                self.rebuild_render_order();
+            }
+
+            // -- Camera zoom --
+            Action::SetZoom { value } => {
+                if let Some(cam) = &mut self.active_camera {
+                    cam.zoom = value.max(0.01);
+                }
+            }
+            Action::AddZoom { value } => {
+                if let Some(cam) = &mut self.active_camera {
+                    cam.zoom = (cam.zoom + value).max(0.01);
                 }
             }
 

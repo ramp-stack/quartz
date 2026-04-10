@@ -349,8 +349,10 @@ impl Canvas {
     pub(crate) fn rebuild_particle_visuals(&mut self) {
         self.particle_images.clear();
         self.layout.particle_offsets.clear();
+        self.particle_render_layers.clear();
 
         if self.last_particle_states.is_empty() {
+            self.rebuild_render_order();
             return;
         }
 
@@ -369,6 +371,73 @@ impl Canvas {
                 color: Some(Color(r, g, b, a)),
             });
             self.layout.particle_offsets.push(ps.position);
+            self.particle_render_layers.push(ps.render_layer);
+        }
+
+        self.rebuild_render_order();
+    }
+
+    /// Refresh sorted_offsets from the live offset arrays without re-sorting.
+    /// Call this at the end of every tick so `build()` sees current positions.
+    pub(crate) fn sync_sorted_offsets(&mut self) {
+        use super::core::RenderSlot;
+        for (i, slot) in self.render_order.iter().enumerate() {
+            let off = match slot {
+                RenderSlot::Object(obj_i) => {
+                    self.layout.offsets.get(*obj_i).copied().unwrap_or((0.0, 0.0))
+                }
+                RenderSlot::Particle(p_i) => {
+                    self.layout.particle_offsets.get(*p_i).copied().unwrap_or((0.0, 0.0))
+                }
+            };
+            if let Some(s) = self.layout.sorted_offsets.get_mut(i) {
+                *s = off;
+            }
+        }
+    }
+
+    /// Build sorted render_order + sorted_offsets from object & particle layers.
+    pub(crate) fn rebuild_render_order(&mut self) {
+        use super::core::RenderSlot;
+
+        let obj_count = self.store.objects.len();
+        let part_count = self.particle_images.len();
+
+        let mut slots: Vec<(i32, usize, RenderSlot)> = Vec::with_capacity(obj_count + part_count);
+
+        for i in 0..obj_count {
+            let layer = self.store.objects[i].layer;
+            slots.push((layer, i, RenderSlot::Object(i)));
+        }
+        for i in 0..part_count {
+            let layer = self.particle_render_layers.get(i).copied().unwrap_or(0);
+            // Use obj_count + i as secondary key so particles at the same layer
+            // sort after objects (preserving backward-compatible default).
+            slots.push((layer, obj_count + i, RenderSlot::Particle(i)));
+        }
+
+        // Stable sort by layer first, then by original insertion order.
+        slots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+        self.render_order.clear();
+        self.layout.sorted_offsets.clear();
+        self.layout.sorted_ignore_zoom.clear();
+
+        for &(_, _, slot) in &slots {
+            self.render_order.push(slot);
+            match slot {
+                RenderSlot::Object(i)   => {
+                    let off = self.layout.offsets.get(i).copied().unwrap_or((0.0, 0.0));
+                    self.layout.sorted_offsets.push(off);
+                    let no_zoom = self.store.objects.get(i).map_or(false, |o| o.ignore_zoom);
+                    self.layout.sorted_ignore_zoom.push(no_zoom);
+                }
+                RenderSlot::Particle(i) => {
+                    let off = self.layout.particle_offsets.get(i).copied().unwrap_or((0.0, 0.0));
+                    self.layout.sorted_offsets.push(off);
+                    self.layout.sorted_ignore_zoom.push(false);
+                }
+            }
         }
     }
 }

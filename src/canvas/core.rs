@@ -14,6 +14,14 @@ use crate::value::Value;
 use crate::crystalline::{CrystallinePhysics, ParticleSystem, ParticleState};
 
 
+/// Identifies a child drawable in the render order.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RenderSlot {
+    Object(usize),
+    Particle(usize),
+}
+
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CanvasMode {
     Landscape,
@@ -43,10 +51,16 @@ impl CanvasMode {
 pub struct CanvasLayout {
     pub offsets:             Vec<(f32, f32)>,
     pub(crate) particle_offsets: Vec<(f32, f32)>,
+    /// Layer-sorted offsets matching the render_order. Rebuilt each frame.
+    pub(crate) sorted_offsets:   Vec<(f32, f32)>,
     pub canvas_size:         Cell<(f32, f32)>,
     pub mode:                CanvasMode,
     pub scale:               Cell<f32>,
     pub safe_area_offset:    Cell<(f32, f32)>,
+    /// Camera zoom factor applied on top of virtual-res scale. Default 1.0.
+    pub(crate) zoom:         Cell<f32>,
+    /// Per-slot flag: `true` means this child should ignore camera zoom.
+    pub(crate) sorted_ignore_zoom: Vec<bool>,
 }
 
 impl Layout for CanvasLayout {
@@ -56,12 +70,12 @@ impl Layout for CanvasLayout {
 
     fn build(&self, size: (f32, f32), children: Vec<SizeRequest>) -> Vec<Area> {
         assert_eq!(
-            self.offsets.len() + self.particle_offsets.len(),
+            self.sorted_offsets.len(),
             children.len(),
-            "CanvasLayout: offset count must match child count"
+            "CanvasLayout: sorted_offsets count must match child count"
         );
 
-        let (scale, padding_x, padding_y, virtual_res) = match self.mode.virtual_resolution() {
+        let (base_scale, padding_x, padding_y, virtual_res) = match self.mode.virtual_resolution() {
             None => (1.0_f32, 0.0_f32, 0.0_f32, size),
             Some(vres) => {
                 let s  = (size.0 / vres.0).min(size.1 / vres.1);
@@ -71,18 +85,23 @@ impl Layout for CanvasLayout {
             }
         };
 
+        let zoom = self.zoom.get().max(0.01);
+        let scale = base_scale * zoom;
+
         self.scale.set(scale);
         self.safe_area_offset.set((padding_x, padding_y));
         self.canvas_size.set(virtual_res);
 
-        self.offsets.iter().chain(self.particle_offsets.iter())
+        self.sorted_offsets.iter()
             .copied()
+            .zip(self.sorted_ignore_zoom.iter().copied())
             .zip(children)
-            .map(|(offset, child)| {
+            .map(|((offset, no_zoom), child)| {
+                let s = if no_zoom { base_scale } else { scale };
                 let child_size = child.get((f32::MAX, f32::MAX));
                 Area {
-                    offset: (offset.0 * scale + padding_x, offset.1 * scale + padding_y),
-                    size:   (child_size.0 * scale, child_size.1 * scale),
+                    offset: (offset.0 * s + padding_x, offset.1 * s + padding_y),
+                    size:   (child_size.0 * s, child_size.1 * s),
                 }
             }).collect()
     }
@@ -111,6 +130,10 @@ pub struct Canvas {
     pub(crate) image_cache:          HashMap<String, Image>,
     /// Per-emitter attachment locations (emitter_name → Location).
     pub(crate) emitter_locations:    HashMap<String, crate::types::Location>,
+    /// Per-particle render layer (parallel to particle_images).
+    pub(crate) particle_render_layers: Vec<i32>,
+    /// Layer-sorted draw order, rebuilt each frame.
+    pub(crate) render_order:         Vec<RenderSlot>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -125,15 +148,22 @@ impl std::fmt::Debug for Canvas {
 
 impl Component for Canvas {
     fn children(&self) -> Vec<&dyn Drawable> {
-        self.store.objects.iter().map(|o| o as &dyn Drawable)
-            .chain(self.particle_images.iter().map(|i| i as &dyn Drawable))
-            .collect()
+        self.render_order.iter().map(|slot| match slot {
+            RenderSlot::Object(i)   => &self.store.objects[*i] as &dyn Drawable,
+            RenderSlot::Particle(i) => &self.particle_images[*i] as &dyn Drawable,
+        }).collect()
     }
 
     fn children_mut(&mut self) -> Vec<&mut dyn Drawable> {
-        self.store.objects.iter_mut().map(|o| o as &mut dyn Drawable)
-            .chain(self.particle_images.iter_mut().map(|i| i as &mut dyn Drawable))
-            .collect()
+        let order = self.render_order.clone();
+        let mut obj_slots: Vec<Option<&mut dyn Drawable>> = self.store.objects.iter_mut()
+            .map(|o| Some(o as &mut dyn Drawable)).collect();
+        let mut part_slots: Vec<Option<&mut dyn Drawable>> = self.particle_images.iter_mut()
+            .map(|i| Some(i as &mut dyn Drawable)).collect();
+        order.iter().map(|slot| match slot {
+            RenderSlot::Object(i)   => obj_slots[*i].take().unwrap(),
+            RenderSlot::Particle(i) => part_slots[*i].take().unwrap(),
+        }).collect()
     }
 
     fn layout(&self) -> &dyn Layout {

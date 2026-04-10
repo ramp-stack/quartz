@@ -36,7 +36,7 @@ pub struct GameObject {
     pub scaled_size:     Cell<(f32, f32)>,
     pub is_platform:     bool,
     pub visible:         bool,
-    pub layer:           Option<u32>,
+    pub layer:           i32,
     pub(crate) text_spec:       Option<TextSpec>,
     pub(crate) last_text_scale: Cell<f32>,
     pub(crate) image_path:      Option<String>,
@@ -68,6 +68,9 @@ pub struct GameObject {
     pub auto_align:           bool,
     pub auto_align_speed:     f32,
     pub auto_align_threshold: f32,
+    /// When `true`, this object is not affected by camera zoom.
+    /// Position and size stay fixed in virtual-resolution space.
+    pub ignore_zoom:          bool,
 }
 
 impl OnEvent for GameObject {}
@@ -136,7 +139,7 @@ impl GameObject {
             resistance:  (1.0, 1.0),
             gravity:     0.0,
             is_platform: false,
-            layer:       None,
+            layer:       0,
             rotation:    0.0,
             slope:       None,
             one_way:     false,
@@ -157,6 +160,7 @@ impl GameObject {
             auto_align:           false,
             auto_align_speed:     3.0,
             auto_align_threshold: 45.0,
+            ignore_zoom:          false,
         }
     }
 
@@ -186,7 +190,7 @@ impl GameObject {
             scaled_size:     Cell::new((size, size)),
             is_platform:     false,
             visible:         true,
-            layer:           None,
+            layer:           0,
             rotation:            0.0,
             slope:               None,
             one_way:             false,
@@ -216,6 +220,7 @@ impl GameObject {
             auto_align:           false,
             auto_align_speed:     3.0,
             auto_align_threshold: 45.0,
+            ignore_zoom:          false,
         }
     }
 
@@ -245,7 +250,7 @@ impl GameObject {
             scaled_size:     Cell::new(size),
             is_platform:     false,
             visible:         true,
-            layer:           None,
+            layer:           0,
             rotation:            0.0,
             slope:               None,
             one_way:             false,
@@ -275,6 +280,7 @@ impl GameObject {
             auto_align:           false,
             auto_align_speed:     3.0,
             auto_align_threshold: 45.0,
+            ignore_zoom:          false,
         }
     }
 

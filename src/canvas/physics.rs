@@ -49,16 +49,22 @@ impl Canvas {
         let scale = self.layout.scale.get();
         let has_crystalline = self.crystalline.is_some();
 
+        // ignore_zoom objects need base_scale (without zoom) for their
+        // shape/text sizing so it matches what build() applies to them.
+        let zoom = self.layout.zoom.get().max(0.01);
+        let base_scale = if zoom.abs() > f32::EPSILON { scale / zoom } else { scale };
+
         for (idx, obj) in self.store.objects.iter_mut().enumerate() {
             obj.grounded = false;
-            obj.scaled_size.set((obj.size.0 * scale, obj.size.1 * scale));
+            let obj_scale = if obj.ignore_zoom { base_scale } else { scale };
+            obj.scaled_size.set((obj.size.0 * obj_scale, obj.size.1 * obj_scale));
             obj.update_animation(delta_time);
 
             if obj.animated_sprite.is_none() {
                 obj.update_image_shape();
             }
 
-            obj.update_text_scale(scale);
+            obj.update_text_scale(obj_scale);
 
             if obj.visible {
                 if !has_crystalline {
@@ -97,7 +103,12 @@ impl Canvas {
             let adj = rotation_adjusted_offset(
                 obj.position, obj.size, obj.rotation, obj.slope.is_some(),
             );
-            self.layout.offsets[idx] = (adj.0 - cam_x, adj.1 - cam_y);
+            // ignore_zoom objects live in virtual-screen space — don't subtract camera.
+            if obj.ignore_zoom {
+                self.layout.offsets[idx] = adj;
+            } else {
+                self.layout.offsets[idx] = (adj.0 - cam_x, adj.1 - cam_y);
+            }
         }
 
         // Also offset particle positions by camera so they render on-screen.
@@ -105,6 +116,9 @@ impl Canvas {
             offset.0 -= cam_x;
             offset.1 -= cam_y;
         }
+
+        // Propagate camera zoom to the layout so build() scales everything.
+        self.layout.zoom.set(cam.zoom.max(0.01));
 
         self.active_camera = Some(cam);
     }
