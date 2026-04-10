@@ -593,6 +593,14 @@ Action  (enum, Clone, Debug)
   SetEmitterColor         { name: String, value: (u8, u8, u8, u8) }     // NEW
   SetEmitterGravityScale  { name: String, value: f32 }                   // NEW
   SetEmitterCollision     { name: String, value: CollisionResponse }     // NEW
+  SetEmitterRenderLayer   { name: String, value: i32 }                   // NEW
+
+  // -- Render layer ---                                                 // NEW
+  SetRenderLayer  { target: Target, layer: i32 }                         // NEW
+
+  // -- Camera zoom ---                                                  // NEW
+  SetZoom { value: f32 }                                                 // NEW
+  AddZoom { value: f32 }                                                 // NEW
 
   // -- Planet gravity actions ---                                       // NEW
   SetGravityStrength { target: Target, value: f32 }                      // NEW
@@ -654,6 +662,10 @@ Action builder methods:
   Action::set_emitter_color(name, r, g, b, a)                            // NEW
   Action::set_emitter_gravity_scale(name, value)                         // NEW
   Action::set_emitter_collision(name, value)                              // NEW
+  Action::set_emitter_render_layer(name, value)                          // NEW
+  Action::set_render_layer(target, layer)                                // NEW
+  Action::set_zoom(value)                                                // NEW
+  Action::add_zoom(value)                                                // NEW
   Action::set_gravity_strength(target, value)                            // NEW
   Action::set_planet_radius(target, value)                               // NEW
   Action::set_gravity_target(target, tag)                                // NEW
@@ -706,7 +718,7 @@ Builder methods (all return Self):
   .size(w: f32, h: f32)
   .tag(tag: impl Into<String>)   may be called multiple times
   .image(img: Image)
-  .layer(id: u32)
+  .layer(id: i32)                    render layer (default 0, lower = behind)
   .gravity(g: f32)
   .momentum(x: f32, y: f32)
   .resistance(x: f32, y: f32)
@@ -737,6 +749,7 @@ Builder methods (all return Self):
   .auto_align()                      enable planet surface alignment     // NEW
   .auto_align_speed(speed: f32)      rotation lerp speed (default 3.0)  // NEW
   .auto_align_threshold(threshold: f32)  degrees (default 45.0)         // NEW
+  .ignore_zoom()                     exempt from camera zoom (for HUD)  // NEW
   .gravity_well(radius: f32, strength: f32)  planet_radius + non-solid  // NEW
   .elasticity(val: f32) / .friction(val: f32) / .density(val: f32)      // NEW
   .bouncy()              material preset: PhysicsMaterial::bouncy()      // NEW
@@ -772,7 +785,7 @@ GameObject  (struct, Clone, Debug)
     visible:             bool
     is_platform:         bool
     tags:                Vec<String>
-    layer:               Option<u32>
+    layer:               i32          render layer (default 0, lower = behind) // UPDATED
     animated_sprite:     Option<AnimatedSprite>
     rotation:            f32
     slope:               Option<(f32, f32)>
@@ -796,6 +809,7 @@ GameObject  (struct, Clone, Debug)
     auto_align:          bool                                             // NEW
     auto_align_speed:    f32              default 3.0                     // NEW
     auto_align_threshold: f32            default 45.0 degrees            // NEW
+    ignore_zoom:         bool             default false — HUD-mode       // NEW
 
   Constructors (legacy):                                                  // NEW
     GameObject::new(ctx, id, drawable, size: f32, position, tags,         // NEW
@@ -1017,22 +1031,23 @@ load_scene behaviour:
 --------------------------------------------------------------------------------
 
 Camera::new(world_size: (f32,f32), viewport_size: (f32,f32)) -> Camera
-  lerp_speed defaults to 0.10.
+  lerp_speed defaults to 0.10. zoom defaults to 1.0.
 
 Camera::follow(target: Option<Target>)
   Set or clear the object the camera follows each tick.
 
 Camera::center_on(wx: f32, wy: f32)
   Instantly reposition camera so (wx, wy) is centred in the viewport,
-  clamped to world bounds.
+  clamped to world bounds. Zoom-aware: visible area = viewport / zoom.
 
 Camera::lerp_toward(wx: f32, wy: f32)   pub(crate)
-  Smooth step toward the given world position each tick.
+  Smooth step toward the given world position each tick. Zoom-aware.
 
 Public fields:
   position:    (f32, f32)   current camera offset applied to all objects
   world_size:  (f32, f32)
   lerp_speed:  f32          default 0.10
+  zoom:        f32          camera zoom factor (default 1.0, >1 = zoom in)  // NEW
 
 --------------------------------------------------------------------------------
   MODULE: SoundOptions / SoundHandle  (sound.rs)
@@ -1401,6 +1416,7 @@ Particle  (struct, Clone, Debug)                                         // NEW
     gravity_scale:      f32          per-particle gravity multiplier
     rotation:           f32
     collision_response: CollisionResponse
+    render_layer:       i32          render layer (inherited from emitter)    // NEW
 
 CollisionResponse  (enum, Clone, Debug, Default=None)                    // NEW
   None                         particles ignore collisions
@@ -1426,6 +1442,7 @@ Emitter  (struct, Clone, Debug)                                          // NEW
     gravity_scale:      f32          per-particle gravity multiplier
     collision_response: CollisionResponse
     rotation:           f32          degrees applied to velocity at emit time
+    render_layer:       i32          render layer (default 0, lower = behind)  // NEW
 
   .named(name: impl Into<String>) -> Self                                // NEW
     Rename an emitter (for use after creating from a preset).
@@ -1467,6 +1484,7 @@ EmitterBuilder  (struct)                                                 // NEW
     .color(r: u8, g: u8, b: u8, a: u8)                                  // NEW
     .gravity_scale(g: f32)                                               // NEW
     .collision(resp: CollisionResponse)                                  // NEW
+    .render_layer(layer: i32)                                            // NEW
     .build() -> Emitter                                                  // NEW
 
 --------------------------------------------------------------------------------
@@ -1503,7 +1521,7 @@ ParticleSystem  (struct, Clone)                                          // NEW
     particle-platform collision.
 
 ParticleState  (struct, Clone)                                           // NEW
-  Render-ready output. Fields: position, size, color, rotation
+  Render-ready output. Fields: position, size, color, rotation, render_layer
 
 ParticleStepResult  (struct)                                             // NEW
   Output from step(). Field: particles: Vec<ParticleState>

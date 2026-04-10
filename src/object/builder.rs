@@ -19,7 +19,7 @@ pub struct GameObjectBuilder {
     pub(super) resistance:  (f32, f32),
     pub(super) gravity:     f32,
     pub(super) is_platform: bool,
-    pub layer:              Option<u32>,
+    pub layer:              i32,
     pub(super) rotation:    f32,
     pub(super) slope:       Option<(f32, f32)>,
     pub(super) one_way:     bool,
@@ -40,10 +40,11 @@ pub struct GameObjectBuilder {
     pub(super) auto_align:           bool,
     pub(super) auto_align_speed:     f32,
     pub(super) auto_align_threshold: f32,
+    pub(super) ignore_zoom:          bool,
 }
 
 impl GameObjectBuilder {
-    pub fn layer(mut self, id: u32) -> Self { self.layer = Some(id); self }
+    pub fn layer(mut self, id: i32) -> Self { self.layer = id; self }
 
     pub fn image(mut self, image: Image) -> Self {
         let (path, mtime) = capture_asset_path();
@@ -167,6 +168,8 @@ impl GameObjectBuilder {
     pub fn auto_align_threshold(mut self, threshold: f32) -> Self {
         self.auto_align_threshold = threshold.max(0.0); self
     }
+    /// Mark this object as zoom-independent (HUD elements, overlays, etc.).
+    pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
         self.planet_radius = Some(radius.max(0.0));
         self.gravity_strength = strength.max(0.0);
@@ -249,6 +252,7 @@ impl GameObjectBuilder {
             auto_align:           self.auto_align,
             auto_align_speed:     self.auto_align_speed,
             auto_align_threshold: self.auto_align_threshold,
+            ignore_zoom:          self.ignore_zoom,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }
         obj

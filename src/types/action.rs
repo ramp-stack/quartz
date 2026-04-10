@@ -85,6 +85,14 @@ pub enum Action {
     SetEmitterColor         { name: String, value: (u8, u8, u8, u8) },
     SetEmitterGravityScale  { name: String, value: f32 },
     SetEmitterCollision     { name: String, value: CollisionResponse },
+    SetEmitterRenderLayer   { name: String, value: i32 },
+
+    // -- Render layer ---
+    SetRenderLayer  { target: Target, layer: i32 },
+
+    // -- Camera zoom ---
+    SetZoom { value: f32 },
+    AddZoom { value: f32 },
 
     // -- Planet gravity actions ---
     SetGravityStrength { target: Target, value: f32 },
@@ -234,6 +242,18 @@ impl Action {
     }
     pub fn set_emitter_collision(name: impl Into<String>, value: CollisionResponse) -> Self {
         Action::SetEmitterCollision { name: name.into(), value }
+    }
+    pub fn set_emitter_render_layer(name: impl Into<String>, value: i32) -> Self {
+        Action::SetEmitterRenderLayer { name: name.into(), value }
+    }
+    pub fn set_render_layer(target: Target, layer: i32) -> Self {
+        Action::SetRenderLayer { target, layer }
+    }
+    pub fn set_zoom(value: f32) -> Self {
+        Action::SetZoom { value }
+    }
+    pub fn add_zoom(value: f32) -> Self {
+        Action::AddZoom { value }
     }
     pub fn set_gravity_strength(target: Target, value: f32) -> Self {
         Action::SetGravityStrength { target, value }

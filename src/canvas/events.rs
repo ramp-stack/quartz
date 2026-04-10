@@ -68,6 +68,7 @@ impl OnEvent for Canvas {
             self.apply_auto_align();
 
             self.apply_camera_transform();
+            self.sync_sorted_offsets();
 
             let canvas_size = self.layout.canvas_size.get();
             let boundary_indices: Vec<usize> = self.store.objects.iter()
