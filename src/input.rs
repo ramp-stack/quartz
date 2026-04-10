@@ -152,7 +152,7 @@ impl Canvas {
     }
 
     pub(crate) fn handle_keyboard_event(&mut self, evt: &KeyboardEvent) {
-        let KeyboardEvent { state, key } = evt;
+        let KeyboardEvent { state, key, .. } = evt;
         match state {
             KeyboardState::Pressed if self.input.held_keys.insert(key.clone()) => {
                 println!("key {key:?}");
