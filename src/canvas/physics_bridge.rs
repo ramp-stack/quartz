@@ -362,9 +362,10 @@ impl Canvas {
             RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
         );
 
+        let zoom = self.layout.zoom.get().max(0.01);
         for ps in &self.last_particle_states {
             let (r, g, b, a) = ps.color;
-            let s = ps.size;
+            let s = ps.size * zoom;
             self.particle_images.push(Image {
                 shape: ShapeType::RoundedRectangle(ps.rotation, (s, s), 0.0, s * 0.5),
                 image: Arc::clone(&white_pixel),
