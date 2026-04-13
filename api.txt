@@ -71,6 +71,25 @@ IMPORT RULES
     use quartz::{Text, Span, Align, Font, Color};
   Do NOT import from prism directly in application code.
 
+  Arc is re-exported from quartz:
+    use quartz::Arc;   -- or use quartz::* which includes it
+
+--------------------------------------------------------------------------------
+  FREE FUNCTIONS  (lib.rs)
+--------------------------------------------------------------------------------
+
+font(path: &str) -> Arc<Font>
+  Load a font from disk at runtime. Reads the file at path and wraps it
+  in an Arc<Font> ready for use with Text/Span or Canvas::make_text.
+  Panics if the file cannot be read or parsed.
+
+  Example:
+    let hud_font = font("assets/font.ttf");
+
+  Note: font() loads from disk each call. Load once before your on_update
+  closure and clone the Arc into the closure rather than calling font()
+  every frame.
+
 --------------------------------------------------------------------------------
   CREATING TEXT  (prism::canvas — re-exported via quartz)
 --------------------------------------------------------------------------------
@@ -107,10 +126,14 @@ Multi-span text (mixed colors/sizes on one line):
       None, Align::Left, None,
   );
 
-Loading a font:
+Loading a font via assets (compile-time embedding):
 
   let bytes = assets.get_font("JetBrainsMono-Regular.ttf").expect("font");
   let font  = Arc::new(Font::from_bytes(&bytes).expect("invalid font"));
+
+Loading a font via disk (runtime):
+
+  let font = font("assets/font.ttf");   // uses the quartz free function
 
 Attaching text to a GameObject:
 
@@ -123,8 +146,11 @@ Attaching text to a GameObject:
 
 Updating text on an existing object each frame:
 
+  // Build text BEFORE the mutable borrow — never nest make_text inside
+  // get_game_object_mut, as both borrow the canvas.
+  let t = c.make_text("hello".to_string(), 32.0, Color(255,255,255,255), Align::Left, font.clone());
   if let Some(o) = cv.get_game_object_mut("label") {
-      o.set_drawable(Box::new(new_text));
+      o.set_drawable(Box::new(t));
   }
 
 Notes:
@@ -225,6 +251,48 @@ Canvas::is_scene(name: &str) -> bool
 Canvas::pause()
 Canvas::resume()
 Canvas::is_paused() -> bool
+
+--------------------------------------------------------------------------------
+  CANVAS — Virtual Scale & Text Helpers  (canvas/actions.rs)
+--------------------------------------------------------------------------------
+
+Canvas::virtual_scale() -> f32
+  Returns the ratio of actual window width to virtual resolution width.
+    Landscape:  actual_w / 3840.0
+    Portrait:   actual_w / 2160.0
+    Fullscreen: 1.0
+  Use this to scale font sizes and UI elements authored in logical screen
+  pixels into virtual canvas pixels.
+
+Canvas::virt_font_size(logical_px: f32) -> f32
+  Shorthand for logical_px * canvas.virtual_scale().
+  Converts a font size authored in screen pixels to virtual canvas pixels.
+
+Canvas::make_text(text: String, font_size: f32, color: Color, align: Align, font: Arc<Font>) -> Text
+  Creates a Text object with font_size automatically scaled to the virtual
+  canvas via virtual_scale(). Author font sizes in logical screen pixels
+  (e.g. 32.0) and the engine handles the rest.
+
+  IMPORTANT: Call make_text BEFORE calling get_game_object_mut — both
+  borrow the canvas and cannot be nested. Build the Text value first,
+  then pass it to set_drawable.
+
+  Example:
+    // Load font once outside on_update
+    let hud_font = font("assets/font.ttf");
+
+    canvas.on_update(move |c| {
+        let score_text = c.make_text(
+            format!("SCORE: {}", score),
+            42.0,
+            Color(255, 255, 255, 255),
+            Align::Right,
+            hud_font.clone(),
+        );
+        if let Some(obj) = c.get_game_object_mut("score") {
+            obj.set_drawable(Box::new(score_text));
+        }
+    });
 
 --------------------------------------------------------------------------------
   CANVAS — Game Variables  (canvas/actions.rs)
@@ -457,6 +525,7 @@ Implements prism::layout::Layout.
     mode:             CanvasMode
     scale:            Cell<f32>
     safe_area_offset: Cell<(f32, f32)>
+    actual_size:      Cell<(f32, f32)>   actual window size — updated each frame
 
 --------------------------------------------------------------------------------
   MODULE: Target / Location / Anchor  (types/targeting.rs)
@@ -568,7 +637,7 @@ Condition  (enum, Debug, Clone)
   CrystallineEnabled
   EmitterActive(String)
   OnPlanet(Target, Target)       object within planet surface radius
-  InGravityField(Target, Target) object within 3× planet radius
+  InGravityField(Target, Target) object within 3x planet radius
 
   Condition::expr(s: impl Into<String>) -> Condition
   Condition::expr_checked(s: impl Into<String>) -> Result<Condition, String>
@@ -860,7 +929,7 @@ GameObject  (struct, Clone, Debug)
   Constructors (legacy):
     GameObject::new(ctx, id, drawable, size: f32, position, tags,
                     momentum, resistance, gravity) -> Self
-      Square object (size × size). Prefer build().
+      Square object (size x size). Prefer build().
     GameObject::new_rect(ctx, id, drawable, size: (f32,f32), position,
                          tags, momentum, resistance, gravity) -> Self
       Rectangular object. Prefer build().
@@ -1313,7 +1382,7 @@ PhysicsMaterial  (struct, Clone, Copy, Debug)
   Fields:
     elasticity: f32   0.0 = no bounce, 1.0 = full bounce (default 0.0)
     friction:   f32   surface friction coefficient (default 0.5)
-    density:    f32   mass = density × area (default 1.0)
+    density:    f32   mass = density x area (default 1.0)
 
   PhysicsMaterial::default() -> Self   { 0.0, 0.5, 1.0 }
 

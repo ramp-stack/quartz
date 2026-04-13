@@ -21,21 +21,24 @@ use super::core::CanvasLayout;
 use super::core::CanvasMode;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
+use prism::canvas::{Text, Span, Align, Font, Color};
 
 impl Canvas {
     pub fn new(_ctx: &mut prism::Context, mode: CanvasMode) -> Self {
         let virtual_res = mode.virtual_resolution().unwrap_or((0.0, 0.0));
         Self {
             layout: CanvasLayout {
-                offsets:          Vec::new(),
-                particle_offsets: Vec::new(),
-                sorted_offsets:   Vec::new(),
-                canvas_size:      Cell::new(virtual_res),
+                offsets:            Vec::new(),
+                particle_offsets:   Vec::new(),
+                sorted_offsets:     Vec::new(),
+                canvas_size:        Cell::new(virtual_res),
                 mode,
-                scale:            Cell::new(1.0),
-                safe_area_offset: Cell::new((0.0, 0.0)),
-                zoom:             Cell::new(1.0),
+                scale:              Cell::new(1.0),
+                safe_area_offset:   Cell::new((0.0, 0.0)),
+                zoom:               Cell::new(1.0),
                 sorted_ignore_zoom: Vec::new(),
+                actual_size:        Cell::new(virtual_res),
             },
             store:            ObjectStore::new(),
             input:            InputState::new(),
@@ -48,17 +51,16 @@ impl Canvas {
             file_watchers:    Vec::new(),
             game_vars:        HashMap::new(),
             paused:           false,
-            crystalline:          None,
-            particle_system:      None,
-            last_particle_states: Vec::new(),
-            particle_images:      Vec::new(),
-            image_cache:          HashMap::new(),
-            emitter_locations:    HashMap::new(),
-            particle_render_layers: Vec::new(),
-            render_order:         Vec::new(),
+            crystalline:               None,
+            particle_system:           None,
+            last_particle_states:      Vec::new(),
+            particle_images:           Vec::new(),
+            image_cache:               HashMap::new(),
+            emitter_locations:         HashMap::new(),
+            particle_render_layers:    Vec::new(),
+            render_order:              Vec::new(),
         }
     }
-
 
     pub fn key(&self, name: &str) -> bool {
         let k = match name {
@@ -75,6 +77,33 @@ impl Canvas {
         self.input.held_keys.contains(&k)
     }
 
+    /// Returns the ratio of actual window width to virtual resolution width.
+    pub fn virtual_scale(&self) -> f32 {
+        let actual = self.layout.actual_size.get();
+        match self.layout.mode {
+            CanvasMode::Landscape  => actual.0 / 3840.0,
+            CanvasMode::Portrait   => actual.0 / 2160.0,
+            CanvasMode::Fullscreen => 1.0,
+        }
+    }
+
+    /// Converts a font size authored in logical screen pixels to virtual canvas pixels.
+    pub fn virt_font_size(&self, logical_px: f32) -> f32 {
+        logical_px * self.virtual_scale()
+    }
+
+    /// Create a Text object with font size automatically scaled to the virtual canvas.
+    /// Pass a font loaded via the `font()` free function, a logical pixel size,
+    /// a color, and an alignment. Scaling is handled automatically.
+    pub fn make_text(&self, text: String, font_size: f32, color: Color, align: Align, font: Arc<Font>) -> Text {
+        let scaled = font_size * self.virtual_scale();
+        Text::new(
+            vec![Span::new(text, scaled, Some(scaled * 1.35), font, color, 0.0)],
+            None,
+            align,
+            None,
+        )
+    }
 
     pub fn add_game_object(&mut self, name: String, obj: GameObject) {
         let position = obj.position;
@@ -91,7 +120,6 @@ impl Canvas {
                 .map(|i| if i > idx { i - 1 } else { i })
                 .collect();
             self.mouse.hovered_indices = updated;
-
             self.layout.offsets.remove(idx);
             self.store.remove(name);
             self.rebuild_render_order();
@@ -106,7 +134,6 @@ impl Canvas {
         self.store.name_to_index.get(name).copied()
             .and_then(move |i| self.store.objects.get_mut(i))
     }
-
 
     pub fn run(&mut self, action: Action) {
         match action {
@@ -140,7 +167,6 @@ impl Canvas {
                     .fold(((0.0_f32, 0.0_f32), 0usize), |(acc, cnt), obj| {
                         ((acc.0 + obj.momentum.0, acc.1 + obj.momentum.1), cnt + 1)
                     });
-
                 if count > 0 {
                     let scaled = (total.0 / count as f32 * scale, total.1 / count as f32 * scale);
                     self.store.apply_to_targets(&to, |obj| obj.momentum = scaled);
@@ -197,9 +223,7 @@ impl Canvas {
                 }
             }
             Action::Multi(actions) => {
-                for action in actions {
-                    self.run(action);
-                }
+                for action in actions { self.run(action); }
             }
             Action::PlaySound { path, options } => {
                 self.play_sound_with(&path, options);
@@ -251,9 +275,7 @@ impl Canvas {
             Action::Expr(src) => {
                 match parse_action(&src) {
                     Ok(actions) => {
-                        for action in actions {
-                            self.run(action);
-                        }
+                        for action in actions { self.run(action); }
                     }
                     Err(e) => {
                         debug_assert!(false,
@@ -277,14 +299,10 @@ impl Canvas {
                 }
             }
             Action::AddRotation { target, value } => {
-                self.store.apply_to_targets(&target, |obj| {
-                    obj.rotation += value;
-                });
+                self.store.apply_to_targets(&target, |obj| { obj.rotation += value; });
             }
             Action::ApplyRotation { target, value } => {
-                self.store.apply_to_targets(&target, |obj| {
-                    obj.rotation_momentum += value;
-                });
+                self.store.apply_to_targets(&target, |obj| { obj.rotation_momentum += value; });
             }
             Action::SetSurfaceNormal { target, nx, ny } => {
                 let len = (nx * nx + ny * ny).sqrt().max(0.001);
@@ -316,29 +334,21 @@ impl Canvas {
             Action::ClearGlow { target } => {
                 let indices = self.store.get_indices(&target);
                 for idx in indices {
-                    if let Some(obj) = self.store.objects.get_mut(idx) {
-                        obj.clear_glow();
-                    }
+                    if let Some(obj) = self.store.objects.get_mut(idx) { obj.clear_glow(); }
                 }
             }
             Action::SetTint { target, color } => {
                 let indices = self.store.get_indices(&target);
                 for idx in indices {
-                    if let Some(obj) = self.store.objects.get_mut(idx) {
-                        obj.set_tint(color);
-                    }
+                    if let Some(obj) = self.store.objects.get_mut(idx) { obj.set_tint(color); }
                 }
             }
             Action::ClearTint { target } => {
                 let indices = self.store.get_indices(&target);
                 for idx in indices {
-                    if let Some(obj) = self.store.objects.get_mut(idx) {
-                        obj.clear_tint();
-                    }
+                    if let Some(obj) = self.store.objects.get_mut(idx) { obj.clear_tint(); }
                 }
             }
-
-            // -- Crystalline physics actions --
             Action::SetMaterial { target, material } => {
                 self.store.apply_to_targets(&target, |obj| obj.material = material);
             }
@@ -389,9 +399,7 @@ impl Canvas {
                 }
             }
             Action::WakeBody { target } => {
-                for name in self.store.get_names(&target) {
-                    self.wake_body(&name);
-                }
+                for name in self.store.get_names(&target) { self.wake_body(&name); }
             }
             Action::FreezeBody { target } => {
                 self.store.apply_to_targets(&target, |obj| {
@@ -401,10 +409,7 @@ impl Canvas {
                 });
             }
             Action::UnfreezeBody { target } => {
-                // Restore to a default dynamic state (user can set specifics after).
-                self.store.apply_to_targets(&target, |obj| {
-                    obj.gravity = 1.0;
-                });
+                self.store.apply_to_targets(&target, |obj| { obj.gravity = 1.0; });
             }
             Action::SetCollisionLayer { target, layer } => {
                 self.store.apply_to_targets(&target, |obj| obj.collision_layer = layer);
@@ -412,20 +417,10 @@ impl Canvas {
             Action::SetPhysicsQuality { quality } => {
                 self.set_physics_quality(quality);
             }
-            Action::EnableCrystalline => {
-                self.enable_crystalline();
-            }
-            Action::DisableCrystalline => {
-                self.disable_crystalline();
-            }
-
-            // -- Particle actions --
-            Action::SpawnEmitter { emitter } => {
-                self.add_emitter(emitter);
-            }
-            Action::RemoveEmitter { name } => {
-                self.remove_emitter(&name);
-            }
+            Action::EnableCrystalline  => { self.enable_crystalline(); }
+            Action::DisableCrystalline => { self.disable_crystalline(); }
+            Action::SpawnEmitter { emitter } => { self.add_emitter(emitter); }
+            Action::RemoveEmitter { name }   => { self.remove_emitter(&name); }
             Action::AttachEmitter { emitter_name, target, location } => {
                 if let Some(name) = self.store.get_names(&target).first() {
                     self.attach_emitter_to(&emitter_name, name);
@@ -439,94 +434,60 @@ impl Canvas {
                 self.game_vars.remove(&key);
                 self.emitter_locations.remove(&emitter_name);
             }
-
-            // -- Emitter modification actions --
             Action::SetEmitterRate { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_rate(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_rate(&name, value); }
             }
             Action::SetEmitterLifetime { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_lifetime(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_lifetime(&name, value); }
             }
             Action::SetEmitterVelocity { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_velocity(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_velocity(&name, value); }
             }
             Action::SetEmitterSpread { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_spread(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_spread(&name, value); }
             }
             Action::SetEmitterSize { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_size(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_size(&name, value); }
             }
             Action::SetEmitterColor { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_color(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_color(&name, value); }
             }
             Action::SetEmitterGravityScale { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_gravity_scale(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_gravity_scale(&name, value); }
             }
             Action::SetEmitterCollision { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_collision(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_collision(&name, value); }
             }
             Action::SetEmitterRenderLayer { name, value } => {
-                if let Some(ps) = &mut self.particle_system {
-                    ps.set_emitter_render_layer(&name, value);
-                }
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_render_layer(&name, value); }
             }
             Action::SetRenderLayer { target, layer } => {
                 self.store.apply_to_targets(&target, |obj| obj.layer = layer);
                 self.rebuild_render_order();
             }
-
-            // -- Camera zoom --
             Action::SetZoom { value } => {
-                if let Some(cam) = &mut self.active_camera {
-                    cam.zoom = value.max(0.01);
-                }
+                if let Some(cam) = &mut self.active_camera { cam.zoom = value.max(0.01); }
             }
             Action::AddZoom { value } => {
                 if let Some(cam) = &mut self.active_camera {
                     cam.zoom = (cam.zoom + value).max(0.01);
                 }
             }
-
-            // -- Planet gravity actions --
             Action::SetGravityStrength { target, value } => {
-                self.store.apply_to_targets(&target, |obj| {
-                    obj.gravity_strength = value.max(0.0);
-                });
+                self.store.apply_to_targets(&target, |obj| { obj.gravity_strength = value.max(0.0); });
             }
             Action::SetPlanetRadius { target, value } => {
                 self.store.apply_to_targets(&target, |obj| {
-                    if value > 0.0 {
-                        obj.planet_radius = Some(value);
-                    } else {
-                        obj.planet_radius = None;
-                    }
+                    if value > 0.0 { obj.planet_radius = Some(value); }
+                    else           { obj.planet_radius = None; }
                 });
             }
             Action::SetGravityTarget { target, tag } => {
                 let tag_val = if tag.is_empty() { None } else { Some(tag.clone()) };
-                self.store.apply_to_targets(&target, |obj| {
-                    obj.gravity_target = tag_val.clone();
-                });
+                self.store.apply_to_targets(&target, |obj| { obj.gravity_target = tag_val.clone(); });
             }
         }
     }
-
 
     pub fn add_event(&mut self, event: crate::types::GameEvent, target: Target) {
         let indices = self.store.get_indices(&target);
@@ -551,12 +512,10 @@ impl Canvas {
         self.callbacks.custom.insert(name, Box::new(handler));
     }
 
-
-    pub fn set_camera(&mut self, camera: Camera)         { self.active_camera = Some(camera); }
-    pub fn clear_camera(&mut self)                       { self.active_camera = None; }
-    pub fn camera(&self)     -> Option<&Camera>          { self.active_camera.as_ref() }
-    pub fn camera_mut(&mut self) -> Option<&mut Camera>  { self.active_camera.as_mut() }
-
+    pub fn set_camera(&mut self, camera: Camera)        { self.active_camera = Some(camera); }
+    pub fn clear_camera(&mut self)                      { self.active_camera = None; }
+    pub fn camera(&self)     -> Option<&Camera>         { self.active_camera.as_ref() }
+    pub fn camera_mut(&mut self) -> Option<&mut Camera> { self.active_camera.as_mut() }
 
     pub fn collision_between(&self, t1: &Target, t2: &Target) -> bool {
         let i1 = self.store.get_indices(t1);
@@ -576,7 +535,6 @@ impl Canvas {
         let cx = game_object.position.0 + game_object.size.0 / 2.0;
         let cy = game_object.position.1 + game_object.size.1 / 2.0;
         let r2 = radius_px * radius_px;
-
         self.store.objects.iter().filter(|obj| {
             if obj.id == game_object.id || !obj.visible { return false; }
             let dx = obj.position.0 + obj.size.0 / 2.0 - cx;
@@ -584,11 +542,6 @@ impl Canvas {
             dx * dx + dy * dy <= r2
         }).collect()
     }
-
-    pub fn get_virtual_size(&self) -> (f32, f32) {
-        self.layout.canvas_size.get()
-    }
-
 
     pub fn play_sound(&self, file_path: &str) -> SoundHandle {
         spawn_sound(file_path, SoundOptions::default())
@@ -598,11 +551,7 @@ impl Canvas {
         spawn_sound(file_path, options)
     }
 
-
-
-
-
-    pub fn pause(&mut self)       { self.paused = true; }
-    pub fn resume(&mut self)      { self.paused = false; }
+    pub fn pause(&mut self)         { self.paused = true; }
+    pub fn resume(&mut self)        { self.paused = false; }
     pub fn is_paused(&self) -> bool { self.paused }
 }

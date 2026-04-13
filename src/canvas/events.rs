@@ -36,7 +36,6 @@ impl OnEvent for Canvas {
                 self.process_mouse_over_events(vpos);
             }
 
-            // Fire named custom events registered on objects.
             let custom_names: Vec<String> = self.store.events.iter()
                 .flatten()
                 .filter_map(|e| {
@@ -87,6 +86,10 @@ impl OnEvent for Canvas {
 
 impl Canvas {
     pub fn canvas_size(&self) -> (f32, f32) {
+        self.layout.canvas_size.get()
+    }
+
+    pub fn get_virtual_size(&self) -> (f32, f32) {
         self.layout.canvas_size.get()
     }
 

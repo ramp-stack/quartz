@@ -14,7 +14,6 @@ use crate::value::Value;
 use crate::crystalline::{CrystallinePhysics, ParticleSystem, ParticleState};
 
 
-/// Identifies a child drawable in the render order.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum RenderSlot {
     Object(usize),
@@ -49,18 +48,17 @@ impl CanvasMode {
 
 #[derive(Debug, Clone)]
 pub struct CanvasLayout {
-    pub offsets:             Vec<(f32, f32)>,
-    pub(crate) particle_offsets: Vec<(f32, f32)>,
-    /// Layer-sorted offsets matching the render_order. Rebuilt each frame.
-    pub(crate) sorted_offsets:   Vec<(f32, f32)>,
-    pub canvas_size:         Cell<(f32, f32)>,
-    pub mode:                CanvasMode,
-    pub scale:               Cell<f32>,
-    pub safe_area_offset:    Cell<(f32, f32)>,
-    /// Camera zoom factor applied on top of virtual-res scale. Default 1.0.
-    pub(crate) zoom:         Cell<f32>,
-    /// Per-slot flag: `true` means this child should ignore camera zoom.
+    pub offsets:                  Vec<(f32, f32)>,
+    pub(crate) particle_offsets:  Vec<(f32, f32)>,
+    pub(crate) sorted_offsets:    Vec<(f32, f32)>,
+    pub canvas_size:              Cell<(f32, f32)>,
+    pub mode:                     CanvasMode,
+    pub scale:                    Cell<f32>,
+    pub safe_area_offset:         Cell<(f32, f32)>,
+    pub(crate) zoom:              Cell<f32>,
     pub(crate) sorted_ignore_zoom: Vec<bool>,
+    /// Actual window size in physical pixels, updated each frame by build().
+    pub(crate) actual_size:       Cell<(f32, f32)>,
 }
 
 impl Layout for CanvasLayout {
@@ -74,6 +72,9 @@ impl Layout for CanvasLayout {
             children.len(),
             "CanvasLayout: sorted_offsets count must match child count"
         );
+
+        // Store the actual window size so virtual_scale() can use it.
+        self.actual_size.set(size);
 
         let (base_scale, padding_x, padding_y, virtual_res) = match self.mode.virtual_resolution() {
             None => (1.0_f32, 0.0_f32, 0.0_f32, size),
@@ -123,17 +124,14 @@ pub struct Canvas {
     pub(crate) file_watchers:    Vec<file_watcher::FileWatcher>,
     pub        game_vars:        HashMap<String, Value>,
     pub(crate) paused:           bool,
-    pub(crate) crystalline:          Option<CrystallinePhysics>,
-    pub(crate) particle_system:      Option<ParticleSystem>,
-    pub(crate) last_particle_states: Vec<ParticleState>,
-    pub(crate) particle_images:      Vec<Image>,
-    pub(crate) image_cache:          HashMap<String, Image>,
-    /// Per-emitter attachment locations (emitter_name → Location).
-    pub(crate) emitter_locations:    HashMap<String, crate::types::Location>,
-    /// Per-particle render layer (parallel to particle_images).
-    pub(crate) particle_render_layers: Vec<i32>,
-    /// Layer-sorted draw order, rebuilt each frame.
-    pub(crate) render_order:         Vec<RenderSlot>,
+    pub(crate) crystalline:               Option<CrystallinePhysics>,
+    pub(crate) particle_system:           Option<ParticleSystem>,
+    pub(crate) last_particle_states:      Vec<ParticleState>,
+    pub(crate) particle_images:           Vec<Image>,
+    pub(crate) image_cache:               HashMap<String, Image>,
+    pub(crate) emitter_locations:         HashMap<String, crate::types::Location>,
+    pub(crate) particle_render_layers:    Vec<i32>,
+    pub(crate) render_order:              Vec<RenderSlot>,
 }
 
 impl std::fmt::Debug for Canvas {
