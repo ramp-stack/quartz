@@ -7,7 +7,6 @@ use prism::event::OnEvent;
 use prism::drawable::{Drawable, Component};
 use prism::Context;
 use prism::canvas::{Image, ShapeType, Color};
-use crate::text::TextSpec;
 use crate::sprite::{AnimatedSprite, reload_image_raw, LAST_ASSET_PATH};
 use crate::types::{CollisionMode, GlowConfig, HighlightEffect};
 use crate::crystalline::PhysicsMaterial;
@@ -37,8 +36,6 @@ pub struct GameObject {
     pub is_platform:     bool,
     pub visible:         bool,
     pub layer:           i32,
-    pub(crate) text_spec:       Option<TextSpec>,
-    pub(crate) last_text_scale: Cell<f32>,
     pub(crate) image_path:      Option<String>,
     pub(crate) animation_path:  Option<String>,
     pub(crate) image_mtime:     Option<std::time::SystemTime>,
@@ -60,16 +57,12 @@ pub struct GameObject {
     pub collision_mask:      u32,
     pub clipped:             bool,
     pub clip_origin:         Option<(f32, f32)>,
-
     pub planet_radius:       Option<f32>,
     pub gravity_target:      Option<String>,
     pub gravity_strength:    f32,
-
     pub auto_align:           bool,
     pub auto_align_speed:     f32,
     pub auto_align_threshold: f32,
-    /// When `true`, this object is not affected by camera zoom.
-    /// Position and size stay fixed in virtual-resolution space.
     pub ignore_zoom:          bool,
 }
 
@@ -79,227 +72,100 @@ impl Component for GameObject {
     fn children(&self) -> Vec<&dyn Drawable> {
         if self.visible {
             let mut result = Vec::new();
-            if let Some(d) = &self.drawable {
-                result.push(d.as_ref() as &dyn Drawable);
-            }
-            if let Some(glow) = &self.glow_drawable {
-                result.push(glow.as_ref() as &dyn Drawable);
-            }
-            if let Some(tint) = &self.tint_drawable {
-                result.push(tint.as_ref() as &dyn Drawable);
-            }
+            if let Some(d) = &self.drawable { result.push(d.as_ref() as &dyn Drawable); }
+            if let Some(g) = &self.glow_drawable { result.push(g.as_ref() as &dyn Drawable); }
+            if let Some(t) = &self.tint_drawable { result.push(t.as_ref() as &dyn Drawable); }
             result
-        } else {
-            vec![]
-        }
+        } else { vec![] }
     }
-
     fn children_mut(&mut self) -> Vec<&mut dyn Drawable> {
         if self.visible {
             let mut result = Vec::new();
-            if let Some(d) = &mut self.drawable {
-                result.push(d.as_mut() as &mut dyn Drawable);
-            }
-            if let Some(glow) = &mut self.glow_drawable {
-                result.push(glow.as_mut() as &mut dyn Drawable);
-            }
-            if let Some(tint) = &mut self.tint_drawable {
-                result.push(tint.as_mut() as &mut dyn Drawable);
-            }
+            if let Some(d) = &mut self.drawable { result.push(d.as_mut() as &mut dyn Drawable); }
+            if let Some(g) = &mut self.glow_drawable { result.push(g.as_mut() as &mut dyn Drawable); }
+            if let Some(t) = &mut self.tint_drawable { result.push(t.as_mut() as &mut dyn Drawable); }
             result
-        } else {
-            vec![]
-        }
+        } else { vec![] }
     }
-
-    fn layout(&self) -> &dyn prism::layout::Layout {
-        &self.layout
-    }
-
-    fn clipped(&self) -> bool {
-        self.clipped
-    }
-
-    fn clip_origin(&self) -> Option<prism::drawable::Offset> {
-        self.clip_origin
-    }
+    fn layout(&self) -> &dyn prism::layout::Layout { &self.layout }
+    fn clipped(&self) -> bool { self.clipped }
+    fn clip_origin(&self) -> Option<prism::drawable::Offset> { self.clip_origin }
 }
 
 impl GameObject {
     pub fn build(id: impl Into<String>) -> GameObjectBuilder {
         GameObjectBuilder {
-            id:          id.into(),
-            image:       None,
-            image_path:  None,
-            image_mtime: None,
-            size:        (100.0, 100.0),
-            position:    (0.0, 0.0),
-            tags:        vec![],
-            momentum:    (0.0, 0.0),
-            resistance:  (1.0, 1.0),
-            gravity:     0.0,
-            is_platform: false,
-            layer:       0,
-            rotation:    0.0,
-            slope:       None,
-            one_way:     false,
-            surface_velocity: None,
-            rotation_momentum: 0.0,
-            rotation_resistance: 0.85,
-            surface_normal: (0.0, -1.0),
-            collision_mode: CollisionMode::Surface,
-            highlight:     None,
-            material:      PhysicsMaterial::default(),
-            collision_layer: 0,
-            collision_mask:  u32::MAX,
-            clipped:         false,
-            clip_origin:     None,
-            planet_radius:        None,
-            gravity_target:       None,
-            gravity_strength:     1.0,
-            auto_align:           false,
-            auto_align_speed:     3.0,
-            auto_align_threshold: 45.0,
-            ignore_zoom:          false,
+            id: id.into(), image: None, image_path: None, image_mtime: None,
+            size: (100.0, 100.0), position: (0.0, 0.0), tags: vec![],
+            momentum: (0.0, 0.0), resistance: (1.0, 1.0), gravity: 0.0,
+            is_platform: false, layer: 0, rotation: 0.0, slope: None,
+            one_way: false, surface_velocity: None, rotation_momentum: 0.0,
+            rotation_resistance: 0.85, surface_normal: (0.0, -1.0),
+            collision_mode: CollisionMode::Surface, highlight: None,
+            material: PhysicsMaterial::default(), collision_layer: 0,
+            collision_mask: u32::MAX, clipped: false, clip_origin: None,
+            planet_radius: None, gravity_target: None, gravity_strength: 1.0,
+            auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
+            ignore_zoom: false,
+        }
+    }
+
+    fn default_fields(size: (f32, f32), image_path: Option<String>, image_mtime: Option<std::time::SystemTime>) -> Self {
+        Self {
+            layout: prism::layout::Stack::default(),
+            id: String::new(), tags: vec![], drawable: None, animated_sprite: None,
+            size, position: (0.0, 0.0), momentum: (0.0, 0.0),
+            resistance: (1.0, 1.0), gravity: 0.0,
+            scaled_size: Cell::new(size), is_platform: false, visible: true, layer: 0,
+            rotation: 0.0, slope: None, one_way: false, surface_velocity: None,
+            rotation_momentum: 0.0, rotation_resistance: 0.85,
+            surface_normal: (0.0, -1.0), collision_mode: CollisionMode::Surface,
+            highlight: None, glow_drawable: None, tint_drawable: None, grounded: false,
+            image_path, image_mtime, animation_path: None, animation_mtime: None,
+            material: PhysicsMaterial::default(), collision_layer: 0,
+            collision_mask: u32::MAX, clipped: false, clip_origin: None,
+            planet_radius: None, gravity_target: None, gravity_strength: 1.0,
+            auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
+            ignore_zoom: false,
         }
     }
 
     pub fn new(
-        _ctx: &mut Context,
-        id: String,
-        drawable: Option<impl Drawable + 'static>,
-        size: f32,
-        position: (f32, f32),
-        tags: Vec<String>,
-        momentum: (f32, f32),
-        resistance: (f32, f32),
-        gravity: f32,
+        _ctx: &mut Context, id: String, drawable: Option<impl Drawable + 'static>,
+        size: f32, position: (f32, f32), tags: Vec<String>,
+        momentum: (f32, f32), resistance: (f32, f32), gravity: f32,
     ) -> Self {
         let (image_path, image_mtime) = if drawable.is_some() { capture_asset_path() } else { (None, None) };
-        Self {
-            layout:          prism::layout::Stack::default(),
-            id,
-            tags,
-            drawable:        drawable.map(|d| Box::new(d) as Box<dyn Drawable>),
-            animated_sprite: None,
-            size:            (size, size),
-            position,
-            momentum,
-            resistance,
-            gravity,
-            scaled_size:     Cell::new((size, size)),
-            is_platform:     false,
-            visible:         true,
-            layer:           0,
-            rotation:            0.0,
-            slope:               None,
-            one_way:             false,
-            surface_velocity:    None,
-            rotation_momentum:   0.0,
-            rotation_resistance: 0.85,
-            surface_normal:      (0.0, -1.0),
-            collision_mode:      CollisionMode::Surface,
-            highlight:           None,
-            glow_drawable:       None,
-            tint_drawable:       None,
-            grounded:            false,
-            text_spec:           None,
-            last_text_scale:     Cell::new(0.0),
-            image_path,
-            image_mtime,
-            animation_path:      None,
-            animation_mtime:     None,
-            material:            PhysicsMaterial::default(),
-            collision_layer:     0,
-            collision_mask:      u32::MAX,
-            clipped:             false,
-            clip_origin:         None,
-            planet_radius:        None,
-            gravity_target:       None,
-            gravity_strength:     1.0,
-            auto_align:           false,
-            auto_align_speed:     3.0,
-            auto_align_threshold: 45.0,
-            ignore_zoom:          false,
-        }
+        let mut s = Self::default_fields((size, size), image_path, image_mtime);
+        s.id = id; s.tags = tags; s.position = position;
+        s.momentum = momentum; s.resistance = resistance; s.gravity = gravity;
+        s.drawable = drawable.map(|d| Box::new(d) as Box<dyn Drawable>);
+        s
     }
 
     pub fn new_rect(
-        _ctx: &mut Context,
-        id: String,
-        drawable: Option<impl Drawable + 'static>,
-        size: (f32, f32),
-        position: (f32, f32),
-        tags: Vec<String>,
-        momentum: (f32, f32),
-        resistance: (f32, f32),
-        gravity: f32,
+        _ctx: &mut Context, id: String, drawable: Option<impl Drawable + 'static>,
+        size: (f32, f32), position: (f32, f32), tags: Vec<String>,
+        momentum: (f32, f32), resistance: (f32, f32), gravity: f32,
     ) -> Self {
         let (image_path, image_mtime) = if drawable.is_some() { capture_asset_path() } else { (None, None) };
-        Self {
-            layout:          prism::layout::Stack::default(),
-            id,
-            tags,
-            drawable:        drawable.map(|d| Box::new(d) as Box<dyn Drawable>),
-            animated_sprite: None,
-            size,
-            position,
-            momentum,
-            resistance,
-            gravity,
-            scaled_size:     Cell::new(size),
-            is_platform:     false,
-            visible:         true,
-            layer:           0,
-            rotation:            0.0,
-            slope:               None,
-            one_way:             false,
-            surface_velocity:    None,
-            rotation_momentum:   0.0,
-            rotation_resistance: 0.85,
-            surface_normal:      (0.0, -1.0),
-            collision_mode:      CollisionMode::Surface,
-            highlight:           None,
-            glow_drawable:       None,
-            tint_drawable:       None,
-            grounded:            false,
-            text_spec:           None,
-            last_text_scale:     Cell::new(0.0),
-            image_path,
-            image_mtime,
-            animation_path:      None,
-            animation_mtime:     None,
-            material:            PhysicsMaterial::default(),
-            collision_layer:     0,
-            collision_mask:      u32::MAX,
-            clipped:             false,
-            clip_origin:         None,
-            planet_radius:        None,
-            gravity_target:       None,
-            gravity_strength:     1.0,
-            auto_align:           false,
-            auto_align_speed:     3.0,
-            auto_align_threshold: 45.0,
-            ignore_zoom:          false,
-        }
+        let mut s = Self::default_fields(size, image_path, image_mtime);
+        s.id = id; s.tags = tags; s.position = position;
+        s.momentum = momentum; s.resistance = resistance; s.gravity = gravity;
+        s.drawable = drawable.map(|d| Box::new(d) as Box<dyn Drawable>);
+        s
     }
 
     pub fn with_animation(mut self, animated_sprite: AnimatedSprite) -> Self {
         let (path, mtime) = capture_asset_path();
-        if path.is_some() {
-            self.animation_path  = path;
-            self.animation_mtime = mtime;
-        }
+        if path.is_some() { self.animation_path = path; self.animation_mtime = mtime; }
         self.animated_sprite = Some(animated_sprite);
         self
     }
 
     pub fn with_image(mut self, image: Image) -> Self {
         let (path, mtime) = capture_asset_path();
-        if path.is_some() {
-            self.image_path  = path;
-            self.image_mtime = mtime;
-        }
+        if path.is_some() { self.image_path = path; self.image_mtime = mtime; }
         self.drawable = Some(Box::new(image));
         self
     }
@@ -310,40 +176,27 @@ impl GameObject {
     pub fn with_gravity(mut self, gravity: f32) -> Self { self.gravity = gravity; self }
     pub fn with_momentum(mut self, momentum: (f32, f32)) -> Self { self.momentum = momentum; self }
     pub fn with_resistance(mut self, resistance: (f32, f32)) -> Self { self.resistance = resistance; self }
+    pub fn clip(mut self) -> Self { self.clipped = true; self }
     pub fn set_gravity(&mut self, gravity: f32) { self.gravity = gravity; }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
         let (path, mtime) = capture_asset_path();
-        if path.is_some() {
-            self.animation_path  = path;
-            self.animation_mtime = mtime;
-        }
+        if path.is_some() { self.animation_path = path; self.animation_mtime = mtime; }
         self.animated_sprite = Some(animated_sprite);
     }
 
     pub fn set_image(&mut self, image: Image) {
         let (path, mtime) = capture_asset_path();
-        if path.is_some() {
-            self.image_path  = path;
-            self.image_mtime = mtime;
-        }
-        self.text_spec = None;
-        self.last_text_scale.set(0.0);
-        self.drawable  = Some(Box::new(image));
-    }
-
-    pub fn set_text(&mut self, spec: TextSpec) {
-        let text = spec.build(1.0);
-        self.last_text_scale.set(0.0);
-        self.text_spec = Some(spec);
-        self.drawable  = Some(Box::new(text));
+        if path.is_some() { self.image_path = path; self.image_mtime = mtime; }
+        self.drawable = Some(Box::new(image));
     }
 
     pub fn set_drawable(&mut self, drawable: Box<dyn prism::drawable::Drawable>) {
-        self.text_spec = None;
-        self.last_text_scale.set(0.0);
-        self.drawable  = Some(drawable);
+        self.drawable = Some(drawable);
     }
+
+    pub fn set_clip(&mut self, clip: bool) { self.clipped = clip; }
+    pub fn set_clip_origin(&mut self, origin: Option<(f32, f32)>) { self.clip_origin = origin; }
 
     pub fn update_position(&mut self) {
         self.position.0 += self.momentum.0;
@@ -374,48 +227,34 @@ impl GameObject {
     pub fn update_image_shape(&mut self) {
         let scaled   = self.scaled_size.get();
         let rotation = self.rotation;
-
         let rescale = |img: &mut Image, rot: f32| {
             img.shape = match img.shape {
                 ShapeType::Rectangle(stroke, prev, _) => {
-                    let sx = if prev.0.abs() > f32::EPSILON { scaled.0 / prev.0 } else { 1.0 };
-                    let sy = if prev.1.abs() > f32::EPSILON { scaled.1 / prev.1 } else { 1.0 };
-                    let s = sx.min(sy);
+                    let s = (scaled.0/prev.0.max(f32::EPSILON)).min(scaled.1/prev.1.max(f32::EPSILON));
                     ShapeType::Rectangle(stroke * s, scaled, rot)
                 }
                 ShapeType::Ellipse(stroke, prev, _) => {
-                    let sx = if prev.0.abs() > f32::EPSILON { scaled.0 / prev.0 } else { 1.0 };
-                    let sy = if prev.1.abs() > f32::EPSILON { scaled.1 / prev.1 } else { 1.0 };
-                    let s = sx.min(sy);
+                    let s = (scaled.0/prev.0.max(f32::EPSILON)).min(scaled.1/prev.1.max(f32::EPSILON));
                     ShapeType::Ellipse(stroke * s, scaled, rot)
                 }
-                ShapeType::RoundedRectangle(stroke, prev, _, corner_radius) => {
-                    let sx = if prev.0.abs() > f32::EPSILON { scaled.0 / prev.0 } else { 1.0 };
-                    let sy = if prev.1.abs() > f32::EPSILON { scaled.1 / prev.1 } else { 1.0 };
-                    let s = sx.min(sy);
-                    ShapeType::RoundedRectangle(stroke * s, scaled, rot, corner_radius * s)
+                ShapeType::RoundedRectangle(stroke, prev, _, cr) => {
+                    let s = (scaled.0/prev.0.max(f32::EPSILON)).min(scaled.1/prev.1.max(f32::EPSILON));
+                    ShapeType::RoundedRectangle(stroke * s, scaled, rot, cr * s)
                 }
             };
         };
-
-        if let Some(drawable) = self.drawable.as_mut() {
-            if let Some(ref mut img) = drawable.downcast_mut::<Image>() { rescale(img, rotation); }
-        }
-        if let Some(glow) = self.glow_drawable.as_mut() {
-            if let Some(ref mut img) = glow.downcast_mut::<Image>() { rescale(img, rotation); }
-        }
-        if let Some(tint) = self.tint_drawable.as_mut() {
-            if let Some(ref mut img) = tint.downcast_mut::<Image>() { rescale(img, rotation); }
-        }
+        if let Some(d) = self.drawable.as_mut() { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
+        if let Some(d) = self.glow_drawable.as_mut() { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
+        if let Some(d) = self.tint_drawable.as_mut() { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
     }
 
     fn highlight_shape(&self, stroke: f32, size: (f32, f32)) -> ShapeType {
-        if let Some(drawable) = &self.drawable {
-            if let Some(img) = drawable.downcast_ref::<Image>() {
+        if let Some(d) = &self.drawable {
+            if let Some(img) = d.downcast_ref::<Image>() {
                 return match img.shape {
-                    ShapeType::Ellipse(_, _, _)             => ShapeType::Ellipse(stroke, size, 0.0),
-                    ShapeType::RoundedRectangle(_, _, _, cr) => ShapeType::RoundedRectangle(stroke, size, 0.0, cr),
-                    _                                        => ShapeType::Rectangle(stroke, size, 0.0),
+                    ShapeType::Ellipse(..)              => ShapeType::Ellipse(stroke, size, 0.0),
+                    ShapeType::RoundedRectangle(.., cr) => ShapeType::RoundedRectangle(stroke, size, 0.0, cr),
+                    _                                   => ShapeType::Rectangle(stroke, size, 0.0),
                 };
             }
         }
@@ -447,10 +286,7 @@ impl GameObject {
         self.rebuild_highlight_drawables();
     }
     pub fn clear_glow(&mut self) {
-        if let Some(effect) = &mut self.highlight {
-            effect.glow = None;
-            if effect.tint.is_none() { self.highlight = None; }
-        }
+        if let Some(e) = &mut self.highlight { e.glow = None; if e.tint.is_none() { self.highlight = None; } }
         self.rebuild_highlight_drawables();
     }
     pub fn set_tint(&mut self, color: Color) {
@@ -460,10 +296,7 @@ impl GameObject {
         self.rebuild_highlight_drawables();
     }
     pub fn clear_tint(&mut self) {
-        if let Some(effect) = &mut self.highlight {
-            effect.tint = None;
-            if effect.glow.is_none() { self.highlight = None; }
-        }
+        if let Some(e) = &mut self.highlight { e.tint = None; if e.glow.is_none() { self.highlight = None; } }
         self.rebuild_highlight_drawables();
     }
     pub fn set_highlight(&mut self, effect: HighlightEffect) {
@@ -476,24 +309,12 @@ impl GameObject {
         self.rebuild_highlight_drawables();
     }
 
-    pub(crate) fn update_text_scale(&mut self, scale: f32) {
-        if self.text_spec.is_none() { return; }
-        if (self.last_text_scale.get() - scale).abs() < 0.0001 { return; }
-        if let Some(spec) = &mut self.text_spec {
-            let text = spec.build(scale);
-            self.drawable = Some(Box::new(text));
-        }
-        self.last_text_scale.set(scale);
-    }
-
     pub(crate) fn hot_reload_image(&mut self, path: &str) {
         let Ok(meta)  = std::fs::metadata(path) else { return };
         let Ok(mtime) = meta.modified()          else { return };
         if Some(mtime) == self.image_mtime { return; }
         let img = reload_image_raw(path, self.size);
         self.image_mtime = Some(mtime);
-        self.text_spec   = None;
-        self.last_text_scale.set(0.0);
         self.drawable    = Some(Box::new(img));
         println!("[hot-reload] image reloaded: {path}");
     }

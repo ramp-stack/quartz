@@ -4,7 +4,6 @@ pub mod lerp;
 pub mod object;
 pub mod types;
 pub mod sprite;
-pub mod text;
 pub mod sound;
 pub mod scene;
 pub mod camera;
@@ -64,7 +63,6 @@ pub use crystalline::{
     Emitter, EmitterBuilder, Particle, CollisionResponse,
 };
 pub use entropy::Entropy;
-pub use text::{TextSpec, SpanSpec, make_text, make_text_aligned, make_text_multi};
 pub use lerp::Lerp;
 pub use file_watcher::{Shared, SourceSettings, FromSource};
 
