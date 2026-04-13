@@ -93,8 +93,8 @@ impl Canvas {
     }
 
     /// Create a Text object with font size automatically scaled to the virtual canvas.
-    /// Pass a font loaded via the `font()` free function, a logical pixel size,
-    /// a color, and an alignment. Scaling is handled automatically.
+    /// Pass a font as Arc<Font>, a logical pixel size, a color, and an alignment.
+    /// Scaling is handled automatically — no manual fs multiplication needed.
     pub fn make_text(&self, text: String, font_size: f32, color: Color, align: Align, font: Arc<Font>) -> Text {
         let scaled = font_size * self.virtual_scale();
         Text::new(

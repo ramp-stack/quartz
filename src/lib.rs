@@ -14,8 +14,6 @@ pub(crate) mod file_watcher;
 pub mod expr;
 pub mod crystalline;
 
-use std::sync::Arc;
-
 pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
@@ -70,12 +68,6 @@ pub use value::{
     Expr, Value, MathOp, CompOp,
     resolve_expr, apply_op, compare_operands,
 };
-
-
-pub fn font(path: &str) -> Arc<Font> {
-    let bytes = std::fs::read(path).expect("font file not found");
-    Arc::new(Font::from_bytes(&bytes).expect("invalid font"))
-}
 
 pub mod prelude {
     pub use prism::Context;
@@ -134,7 +126,4 @@ pub mod prelude {
         Expr, Value, MathOp, CompOp,
         resolve_expr, apply_op, compare_operands,
     };
-
-    pub use std::sync::Arc;
-    pub use crate::font;
 }

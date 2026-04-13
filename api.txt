@@ -75,22 +75,6 @@ IMPORT RULES
     use quartz::Arc;   -- or use quartz::* which includes it
 
 --------------------------------------------------------------------------------
-  FREE FUNCTIONS  (lib.rs)
---------------------------------------------------------------------------------
-
-font(path: &str) -> Arc<Font>
-  Load a font from disk at runtime. Reads the file at path and wraps it
-  in an Arc<Font> ready for use with Text/Span or Canvas::make_text.
-  Panics if the file cannot be read or parsed.
-
-  Example:
-    let hud_font = font("assets/font.ttf");
-
-  Note: font() loads from disk each call. Load once before your on_update
-  closure and clone the Arc into the closure rather than calling font()
-  every frame.
-
---------------------------------------------------------------------------------
   CREATING TEXT  (prism::canvas — re-exported via quartz)
 --------------------------------------------------------------------------------
 
