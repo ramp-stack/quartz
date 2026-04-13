@@ -81,17 +81,4 @@ impl GameObject {
             }
         }
     }
-
-    pub fn clip(mut self) -> Self {
-        self.clipped = true;
-        self
-    }
-
-    pub fn set_clip(&mut self, clip: bool) {
-        self.clipped = clip;
-    }
-
-    pub fn set_clip_origin(&mut self, origin: Option<(f32, f32)>) {
-        self.clip_origin = origin;
-    }
 }

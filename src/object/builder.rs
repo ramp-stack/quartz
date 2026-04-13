@@ -140,13 +140,9 @@ impl GameObjectBuilder {
     pub fn collision_layer(mut self, layer: u32) -> Self { self.collision_layer = layer; self }
     pub fn collision_mask(mut self, mask: u32) -> Self { self.collision_mask = mask; self }
 
-    /// Clip children to this object's size bounds at draw time.
     pub fn clip(mut self) -> Self { self.clipped = true; self }
-
-    /// Set a fixed clip origin independent of position.
     pub fn clip_origin(mut self, x: f32, y: f32) -> Self {
-        self.clip_origin = Some((x, y));
-        self
+        self.clip_origin = Some((x, y)); self
     }
 
     pub fn planet(mut self, radius: f32) -> Self {
@@ -168,7 +164,6 @@ impl GameObjectBuilder {
     pub fn auto_align_threshold(mut self, threshold: f32) -> Self {
         self.auto_align_threshold = threshold.max(0.0); self
     }
-    /// Mark this object as zoom-independent (HUD elements, overlays, etc.).
     pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
         self.planet_radius = Some(radius.max(0.0));
@@ -209,50 +204,48 @@ impl GameObjectBuilder {
         let size      = self.size;
         let highlight = self.highlight;
         let mut obj   = GameObject {
-            layout:          prism::layout::Stack::default(),
-            id:              self.id,
-            tags:            self.tags,
-            drawable:        self.image.map(|img| Box::new(img) as Box<dyn Drawable>),
-            animated_sprite: None,
+            layout:              prism::layout::Stack::default(),
+            id:                  self.id,
+            tags:                self.tags,
+            drawable:            self.image.map(|img| Box::new(img) as Box<dyn Drawable>),
+            animated_sprite:     None,
             size,
-            position:        self.position,
-            momentum:        self.momentum,
-            resistance:      self.resistance,
-            gravity:         self.gravity,
-            scaled_size:     Cell::new(size),
-            is_platform:     self.is_platform,
-            visible:         true,
-            layer:           self.layer,
-            rotation:        self.rotation,
-            slope:           self.slope,
-            one_way:         self.one_way,
-            surface_velocity: self.surface_velocity,
-            rotation_momentum: 0.0,
+            position:            self.position,
+            momentum:            self.momentum,
+            resistance:          self.resistance,
+            gravity:             self.gravity,
+            scaled_size:         Cell::new(size),
+            is_platform:         self.is_platform,
+            visible:             true,
+            layer:               self.layer,
+            rotation:            self.rotation,
+            slope:               self.slope,
+            one_way:             self.one_way,
+            surface_velocity:    self.surface_velocity,
+            rotation_momentum:   0.0,
             rotation_resistance: self.rotation_resistance,
-            surface_normal:  self.surface_normal,
-            collision_mode:  self.collision_mode,
-            highlight:       None,
-            glow_drawable:   None,
-            tint_drawable:   None,
-            grounded:        false,
-            text_spec:       None,
-            last_text_scale: Cell::new(0.0),
-            image_path:      self.image_path,
-            image_mtime:     self.image_mtime,
-            animation_path:  None,
-            animation_mtime: None,
-            material:        self.material,
-            collision_layer: self.collision_layer,
-            collision_mask:  self.collision_mask,
-            clipped:         self.clipped,
-            clip_origin:     self.clip_origin,
-            planet_radius:        self.planet_radius,
-            gravity_target:       self.gravity_target.clone(),
-            gravity_strength:     self.gravity_strength,
-            auto_align:           self.auto_align,
-            auto_align_speed:     self.auto_align_speed,
+            surface_normal:      self.surface_normal,
+            collision_mode:      self.collision_mode,
+            highlight:           None,
+            glow_drawable:       None,
+            tint_drawable:       None,
+            grounded:            false,
+            image_path:          self.image_path,
+            image_mtime:         self.image_mtime,
+            animation_path:      None,
+            animation_mtime:     None,
+            material:            self.material,
+            collision_layer:     self.collision_layer,
+            collision_mask:      self.collision_mask,
+            clipped:             self.clipped,
+            clip_origin:         self.clip_origin,
+            planet_radius:       self.planet_radius,
+            gravity_target:      self.gravity_target.clone(),
+            gravity_strength:    self.gravity_strength,
+            auto_align:          self.auto_align,
+            auto_align_speed:    self.auto_align_speed,
             auto_align_threshold: self.auto_align_threshold,
-            ignore_zoom:          self.ignore_zoom,
+            ignore_zoom:         self.ignore_zoom,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }
         obj

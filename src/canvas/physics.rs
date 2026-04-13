@@ -64,8 +64,6 @@ impl Canvas {
                 obj.update_image_shape();
             }
 
-            obj.update_text_scale(obj_scale);
-
             if obj.visible {
                 if !has_crystalline {
                     obj.apply_gravity();
