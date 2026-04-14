@@ -8,7 +8,7 @@ use prism::drawable::{Drawable, Component};
 use prism::Context;
 use prism::canvas::{Image, ShapeType, Color};
 use crate::sprite::{AnimatedSprite, reload_image_raw, LAST_ASSET_PATH};
-use crate::types::{CollisionMode, GlowConfig, HighlightEffect};
+use crate::types::{CollisionMode, GlowConfig, GravityFalloff, HighlightEffect};
 use crate::crystalline::PhysicsMaterial;
 use std::cell::Cell;
 
@@ -60,9 +60,15 @@ pub struct GameObject {
     pub planet_radius:       Option<f32>,
     pub gravity_target:      Option<String>,
     pub gravity_strength:    f32,
+    pub gravity_influence_mult: f32,
+    pub gravity_falloff:     GravityFalloff,
+    pub gravity_all_sources: bool,
+    pub gravity_dominant_id: Option<String>,
+    pub gravity_identity:    Option<String>,
     pub auto_align:           bool,
     pub auto_align_speed:     f32,
     pub auto_align_threshold: f32,
+    pub auto_align_min_depth: f32,
     pub ignore_zoom:          bool,
 }
 
@@ -105,7 +111,10 @@ impl GameObject {
             material: PhysicsMaterial::default(), collision_layer: 0,
             collision_mask: u32::MAX, clipped: false, clip_origin: None,
             planet_radius: None, gravity_target: None, gravity_strength: 1.0,
+            gravity_influence_mult: 3.0, gravity_falloff: GravityFalloff::default(),
+            gravity_all_sources: false, gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
+            auto_align_min_depth: 0.3,
             ignore_zoom: false,
         }
     }
@@ -125,7 +134,11 @@ impl GameObject {
             material: PhysicsMaterial::default(), collision_layer: 0,
             collision_mask: u32::MAX, clipped: false, clip_origin: None,
             planet_radius: None, gravity_target: None, gravity_strength: 1.0,
+            gravity_influence_mult: 3.0, gravity_falloff: GravityFalloff::default(),
+            gravity_all_sources: false, gravity_dominant_id: None,
+            gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
+            auto_align_min_depth: 0.3,
             ignore_zoom: false,
         }
     }

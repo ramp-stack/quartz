@@ -1,7 +1,7 @@
 use prism::drawable::Drawable;
 use prism::canvas::{Image, Color};
 use prism::Context;
-use crate::types::{CollisionMode, GlowConfig, HighlightEffect, collision_layers};
+use crate::types::{CollisionMode, GlowConfig, GravityFalloff, HighlightEffect, collision_layers};
 use crate::crystalline::PhysicsMaterial;
 use std::cell::Cell;
 
@@ -37,9 +37,14 @@ pub struct GameObjectBuilder {
     pub(super) planet_radius:        Option<f32>,
     pub(super) gravity_target:       Option<String>,
     pub(super) gravity_strength:     f32,
+    pub(super) gravity_influence_mult: f32,
+    pub(super) gravity_falloff:      GravityFalloff,
+    pub(super) gravity_all_sources:  bool,
+    pub(super) gravity_identity:     Option<String>,
     pub(super) auto_align:           bool,
     pub(super) auto_align_speed:     f32,
     pub(super) auto_align_threshold: f32,
+    pub(super) auto_align_min_depth: f32,
     pub(super) ignore_zoom:          bool,
 }
 
@@ -157,12 +162,33 @@ impl GameObjectBuilder {
     pub fn gravity_strength(mut self, strength: f32) -> Self {
         self.gravity_strength = strength.max(0.0); self
     }
+    pub fn gravity_influence_mult(mut self, mult: f32) -> Self {
+        self.gravity_influence_mult = mult.max(0.01); self
+    }
+    pub fn gravity_falloff(mut self, falloff: GravityFalloff) -> Self {
+        self.gravity_falloff = falloff; self
+    }
+    pub fn all_gravity_sources(mut self) -> Self {
+        self.gravity_all_sources = true; self
+    }
+    pub fn gravity_identity(mut self, id: impl Into<String>) -> Self {
+        self.gravity_identity = Some(id.into()); self
+    }
+    pub fn celestial_physics(self) -> Self {
+        self.all_gravity_sources().gravity_falloff(GravityFalloff::InverseSquare)
+    }
+    pub fn unlimited_gravity_range(self) -> Self {
+        self.gravity_influence_mult(f32::MAX)
+    }
     pub fn auto_align(mut self) -> Self { self.auto_align = true; self }
     pub fn auto_align_speed(mut self, speed: f32) -> Self {
         self.auto_align_speed = speed.max(0.0); self
     }
     pub fn auto_align_threshold(mut self, threshold: f32) -> Self {
         self.auto_align_threshold = threshold.max(0.0); self
+    }
+    pub fn auto_align_min_depth(mut self, depth: f32) -> Self {
+        self.auto_align_min_depth = depth.clamp(0.0, 1.0); self
     }
     pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
@@ -242,9 +268,15 @@ impl GameObjectBuilder {
             planet_radius:       self.planet_radius,
             gravity_target:      self.gravity_target.clone(),
             gravity_strength:    self.gravity_strength,
+            gravity_influence_mult: self.gravity_influence_mult,
+            gravity_falloff:     self.gravity_falloff,
+            gravity_all_sources: self.gravity_all_sources,
+            gravity_dominant_id: None,
+            gravity_identity:    self.gravity_identity.clone(),
             auto_align:          self.auto_align,
             auto_align_speed:    self.auto_align_speed,
             auto_align_threshold: self.auto_align_threshold,
+            auto_align_min_depth: self.auto_align_min_depth,
             ignore_zoom:         self.ignore_zoom,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }

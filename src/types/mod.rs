@@ -5,6 +5,7 @@ pub mod input_types;
 pub mod condition;
 pub mod action;
 pub mod event;
+pub mod gravity;
 
 pub use targeting::{Target, Location, Anchor};
 pub use collision::{CollisionMode, CollisionShape, collision_layers};
@@ -13,3 +14,4 @@ pub use input_types::{MouseButton, ScrollAxis};
 pub use condition::{Condition, ConditionOps};
 pub use action::Action;
 pub use event::GameEvent;
+pub use gravity::GravityFalloff;

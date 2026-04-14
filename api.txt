@@ -208,6 +208,27 @@ Canvas::clear_camera()
 Canvas::camera() -> Option<&Camera>
 Canvas::camera_mut() -> Option<&mut Camera>
 
+Canvas::smooth_zoom(value: f32)
+  Smoothly transition to a zoom level. No-op if no camera is set.
+
+Canvas::smooth_zoom_at(delta: f32, screen_pos: (f32, f32))
+  Zoom toward a screen-space point (e.g. mouse cursor).
+  Converts screen position to world coordinates automatically.
+  Positive delta = zoom in; negative = zoom out.
+
+Canvas::get_zoom() -> f32
+  Current (interpolated) zoom level. Returns 1.0 if no camera is set.
+
+Canvas::set_zoom_anchor(world_pos: Option<(f32, f32)>)
+  Set the world-space pivot point for zoom operations.
+  Pass None to zoom toward the viewport center (default).
+
+Canvas::screen_to_world(screen_pos: (f32, f32)) -> (f32, f32)
+  Convert a virtual-screen position to world space using the active camera.
+
+Canvas::world_to_screen(world_pos: (f32, f32)) -> (f32, f32)
+  Convert a world position to virtual-screen space using the active camera.
+
 --------------------------------------------------------------------------------
 
 Canvas::collision_between(t1: &Target, t2: &Target) -> bool
@@ -459,6 +480,19 @@ Canvas::spawn_particle_burst(emitter: &Emitter, count: usize)
   One-shot burst of particles from an emitter definition.
   Does NOT add a persistent emitter — particles dissipate on their own.
 
+Canvas::get_dominant_planet(name: &str) -> Option<&str>
+  Returns the gravity_identity of the closest-surface planet for a body.
+
+Canvas::planets_in_range(name: &str) -> Vec<&str>
+  Returns gravity_identity strings of all planets whose gravity field
+  reaches the given object.
+
+Canvas::is_in_gravity_field(name: &str) -> bool
+  True if the object has a dominant planet (is affected by gravity).
+
+Canvas::is_in_any_gravity_field(name: &str) -> bool
+  True if the object is within any planet's gravity range.
+
 --------------------------------------------------------------------------------
   CANVAS — Internal (pub(crate)) — called automatically each tick
 --------------------------------------------------------------------------------
@@ -622,6 +656,9 @@ Condition  (enum, Debug, Clone)
   EmitterActive(String)
   OnPlanet(Target, Target)       object within planet surface radius
   InGravityField(Target, Target) object within 3x planet radius
+  HasDominantPlanet(Target)      object has a closest-surface planet
+  DominantPlanetIs(Target, Target)  object's dominant planet matches
+  InAnyGravityField(Target)      object is in any planet's gravity field
 
   Condition::expr(s: impl Into<String>) -> Condition
   Condition::expr_checked(s: impl Into<String>) -> Result<Condition, String>
@@ -704,9 +741,14 @@ Action  (enum, Clone, Debug)
   SetRenderLayer  { target: Target, layer: i32 }
   SetZoom { value: f32 }
   AddZoom { value: f32 }
+  SmoothZoom { value: f32 }
+  SmoothZoomAt { delta: f32 }
   SetGravityStrength { target: Target, value: f32 }
   SetPlanetRadius    { target: Target, value: f32 }
   SetGravityTarget   { target: Target, tag: String }
+  SetGravityInfluenceMult { target: Target, value: f32 }
+  SetGravityFalloff  { target: Target, falloff: GravityFalloff }
+  SetGravityAllSources { target: Target, enabled: bool }
 
 Action builder methods:
   Action::expr(s)
@@ -765,9 +807,14 @@ Action builder methods:
   Action::set_render_layer(target, layer)
   Action::set_zoom(value)
   Action::add_zoom(value)
+  Action::smooth_zoom(value)
+  Action::smooth_zoom_at(delta)
   Action::set_gravity_strength(target, value)
   Action::set_planet_radius(target, value)
   Action::set_gravity_target(target, tag)
+  Action::set_gravity_influence_mult(target, value)
+  Action::set_gravity_falloff(target, falloff)
+  Action::set_gravity_all_sources(target, enabled)
 
 --------------------------------------------------------------------------------
   MODULE: GameEvent  (types/event.rs)
@@ -848,8 +895,15 @@ Builder methods (all return Self):
   .auto_align()                      enable planet surface alignment
   .auto_align_speed(speed: f32)      rotation lerp speed (default 3.0)
   .auto_align_threshold(threshold: f32)  degrees (default 45.0)
+  .auto_align_min_depth(depth: f32)  0.0–1.0, min field depth before align activates (default 0.3)
   .ignore_zoom()                     exempt from camera zoom (for HUD)
   .gravity_well(radius: f32, strength: f32)  planet_radius + non-solid
+  .gravity_influence_mult(mult: f32)    gravity range multiplier (default 1.0)
+  .gravity_falloff(falloff: GravityFalloff)  Linear or InverseSquare falloff
+  .all_gravity_sources()               respond to all planets regardless of tag
+  .gravity_identity(id: impl Into<String>)  unique planet identity tag
+  .celestial_physics()                 shorthand: all_gravity_sources + InverseSquare
+  .unlimited_gravity_range()           shorthand: gravity_influence_mult(f32::MAX)
   .elasticity(val: f32) / .friction(val: f32) / .density(val: f32)
   .bouncy()              material preset: PhysicsMaterial::bouncy()
   .slippery()            material preset: PhysicsMaterial::ice()
@@ -905,9 +959,18 @@ GameObject  (struct, Clone, Debug)
     planet_radius:       Option<f32>
     gravity_target:      Option<String>
     gravity_strength:    f32              default 1.0
+    gravity_influence_mult: f32           default 1.0 — range multiplier
+    gravity_falloff:     GravityFalloff   default Linear
+    gravity_all_sources: bool             default false — respond to all planets
+    gravity_dominant_id: Option<String>   closest planet (set by engine)
+    gravity_identity:    Option<String>   unique planet identity tag
     auto_align:          bool
     auto_align_speed:    f32              default 3.0
     auto_align_threshold: f32            default 45.0 degrees
+    auto_align_min_depth: f32            default 0.3 (0.0–1.0, min gravity-field
+                                         depth fraction before alignment activates;
+                                         above the threshold, strength ramps to 1.0
+                                         at the planet surface)
     ignore_zoom:         bool             default false — HUD-mode
 
   Constructors (legacy):
@@ -1130,6 +1193,8 @@ load_scene behaviour:
 
 Camera::new(world_size: (f32,f32), viewport_size: (f32,f32)) -> Camera
   lerp_speed defaults to 0.10. zoom defaults to 1.0.
+  zoom_target defaults to 1.0. zoom_lerp_speed defaults to 0.12.
+  zoom_anchor defaults to None.
 
 Camera::follow(target: Option<Target>)
   Set or clear the object the camera follows each tick.
@@ -1138,14 +1203,41 @@ Camera::center_on(wx: f32, wy: f32)
   Instantly reposition camera so (wx, wy) is centred in the viewport,
   clamped to world bounds. Zoom-aware: visible area = viewport / zoom.
 
+Camera::smooth_zoom(target: f32)
+  Set a desired zoom level; the camera lerps smoothly toward it.
+
+Camera::smooth_zoom_at(delta: f32, world_anchor: (f32, f32))
+  Zoom toward a world-space point by a multiplicative delta.
+  Positive delta = zoom in; negative = zoom out.
+  Sets zoom_anchor automatically.
+
+Camera::snap_zoom(value: f32)
+  Snap zoom instantly (also snaps zoom_target to prevent lerp fight).
+
+Camera::screen_to_world(screen: (f32, f32)) -> (f32, f32)
+  Convert a virtual-screen position to world coordinates.
+
+Camera::world_to_screen(world: (f32, f32)) -> (f32, f32)
+  Convert a world position to virtual-screen space.
+
 Camera::lerp_toward(wx: f32, wy: f32)   pub(crate)
   Smooth step toward the given world position each tick. Zoom-aware.
+  Position lerp only — zoom lerp runs separately in advance_zoom_lerp.
+  When zoom_anchor is set, only the X axis is followed; the Y position
+  is controlled entirely by the anchor system (prevents follow from
+  fighting the anchor point).
 
 Public fields:
-  position:    (f32, f32)   current camera offset applied to all objects
-  world_size:  (f32, f32)
-  lerp_speed:  f32          default 0.10
-  zoom:        f32          camera zoom factor (default 1.0, >1 = zoom in)
+  position:        (f32, f32)   current camera offset applied to all objects
+  world_size:      (f32, f32)
+  lerp_speed:      f32          default 0.10
+  zoom:            f32          current displayed zoom (default 1.0, >1 = zoom in)
+  zoom_target:     f32          desired zoom — lerped toward each frame (default 1.0)
+  zoom_lerp_speed: f32          zoom interpolation factor (default 0.12)
+  zoom_anchor:     Option<(f32, f32)>   world-space pivot for zoom (None = center)
+                   When set: position clamping to world bounds is disabled during
+                   zoom adjustment, allowing negative camera positions (needed for
+                   zoom-out with a floor/ground anchor). Follow Y is also disabled.
 
 --------------------------------------------------------------------------------
   MODULE: SoundOptions / SoundHandle  (sound.rs)
@@ -1597,6 +1689,17 @@ orbit_speed(gravity_strength: f32, planet_radius: f32,
 escape_speed(gravity_strength: f32, planet_radius: f32,
              dist: f32) -> f32
   Approximate escape speed at dist from a planet surface.
+
+--------------------------------------------------------------------------------
+  MODULE: GravityFalloff  (types/gravity.rs)
+--------------------------------------------------------------------------------
+
+GravityFalloff  (enum, Debug, Clone, Copy, PartialEq, Default=Linear)
+  Linear         pull ∝ 1/dist — default, consistent with all existing games
+  InverseSquare  pull ∝ 1/dist² — physically accurate, faster long-range falloff
+
+  At planet surface (dist == radius) both produce identical magnitude.
+  InverseSquare enables realistic orbital mechanics.
 
 ================================================================================
   END OF API REFERENCE

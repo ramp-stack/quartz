@@ -466,11 +466,26 @@ impl Canvas {
                 self.rebuild_render_order();
             }
             Action::SetZoom { value } => {
-                if let Some(cam) = &mut self.active_camera { cam.zoom = value.max(0.01); }
+                if let Some(cam) = &mut self.active_camera {
+                    cam.zoom        = value.max(0.01);
+                    cam.zoom_target = value.max(0.01);
+                }
             }
             Action::AddZoom { value } => {
                 if let Some(cam) = &mut self.active_camera {
-                    cam.zoom = (cam.zoom + value).max(0.01);
+                    let new_val = (cam.zoom + value).max(0.01);
+                    cam.zoom        = new_val;
+                    cam.zoom_target = new_val;
+                }
+            }
+            Action::SmoothZoom { value } => {
+                self.smooth_zoom(value);
+            }
+            Action::SmoothZoomAt { delta } => {
+                if let Some(pos) = self.mouse.position {
+                    self.smooth_zoom_at(delta, pos);
+                } else {
+                    self.smooth_zoom(self.get_zoom() * (1.0 + delta));
                 }
             }
             Action::SetGravityStrength { target, value } => {
@@ -485,6 +500,21 @@ impl Canvas {
             Action::SetGravityTarget { target, tag } => {
                 let tag_val = if tag.is_empty() { None } else { Some(tag.clone()) };
                 self.store.apply_to_targets(&target, |obj| { obj.gravity_target = tag_val.clone(); });
+            }
+            Action::SetGravityInfluenceMult { target, value } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.gravity_influence_mult = value.max(0.01);
+                });
+            }
+            Action::SetGravityFalloff { target, falloff } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.gravity_falloff = falloff;
+                });
+            }
+            Action::SetGravityAllSources { target, enabled } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.gravity_all_sources = enabled;
+                });
             }
         }
     }
@@ -516,6 +546,49 @@ impl Canvas {
     pub fn clear_camera(&mut self)                      { self.active_camera = None; }
     pub fn camera(&self)     -> Option<&Camera>         { self.active_camera.as_ref() }
     pub fn camera_mut(&mut self) -> Option<&mut Camera> { self.active_camera.as_mut() }
+
+    /// Smoothly transition to a zoom level. No-op if no camera is set.
+    pub fn smooth_zoom(&mut self, value: f32) {
+        if let Some(cam) = &mut self.active_camera {
+            cam.smooth_zoom(value);
+        }
+    }
+
+    /// Zoom toward a screen-space point (e.g. mouse cursor).
+    /// Converts screen position to world coordinates automatically.
+    pub fn smooth_zoom_at(&mut self, delta: f32, screen_pos: (f32, f32)) {
+        if let Some(cam) = &mut self.active_camera {
+            let world_pt = cam.screen_to_world(screen_pos);
+            cam.smooth_zoom_at(delta, world_pt);
+        }
+    }
+
+    /// Get current (interpolated) zoom level. Returns 1.0 if no camera is set.
+    pub fn get_zoom(&self) -> f32 {
+        self.active_camera.as_ref().map(|c| c.zoom).unwrap_or(1.0)
+    }
+
+    /// Set the world-space pivot point for zoom operations.
+    /// Pass None to zoom toward the viewport center (default).
+    pub fn set_zoom_anchor(&mut self, world_pos: Option<(f32, f32)>) {
+        if let Some(cam) = &mut self.active_camera {
+            cam.zoom_anchor = world_pos;
+        }
+    }
+
+    /// Convert a virtual screen position to world space using the active camera.
+    pub fn screen_to_world(&self, screen_pos: (f32, f32)) -> (f32, f32) {
+        self.active_camera.as_ref()
+            .map(|cam| cam.screen_to_world(screen_pos))
+            .unwrap_or(screen_pos)
+    }
+
+    /// Convert a world position to virtual screen space using the active camera.
+    pub fn world_to_screen(&self, world_pos: (f32, f32)) -> (f32, f32) {
+        self.active_camera.as_ref()
+            .map(|cam| cam.world_to_screen(world_pos))
+            .unwrap_or(world_pos)
+    }
 
     pub fn collision_between(&self, t1: &Target, t2: &Target) -> bool {
         let i1 = self.store.get_indices(t1);
