@@ -3,13 +3,15 @@ mod geometry;
 
 pub use builder::GameObjectBuilder;
 
-use prism::event::OnEvent;
-use prism::drawable::{Drawable, Component};
+use prism::event::{OnEvent, Event};
+use prism::drawable::{Drawable, SizedTree, RequestTree, Offset, Rect, Size};
+use prism::layout::{SizeRequest, Area};
 use prism::Context;
 use prism::canvas::{Image, ShapeType, Color};
 use crate::sprite::{AnimatedSprite, reload_image_raw, LAST_ASSET_PATH};
 use crate::types::{CollisionMode, GlowConfig, GravityFalloff, HighlightEffect};
 use crate::crystalline::PhysicsMaterial;
+use wgpu_canvas::{Area as CanvasArea, Item as CanvasItem};
 use std::cell::Cell;
 
 pub(super) fn capture_asset_path() -> (Option<String>, Option<std::time::SystemTime>) {
@@ -55,11 +57,16 @@ pub struct GameObject {
     pub material:            PhysicsMaterial,
     pub collision_layer:     u32,
     pub collision_mask:      u32,
-    pub clipped:             bool,
-    pub clip_origin:         Option<(f32, f32)>,
+    pub ped:                 bool,
+    pub _origin:             Option<(f32, f32)>,
+    pub _size:               Option<(f32, f32)>,
     pub planet_radius:       Option<f32>,
     pub gravity_target:      Option<String>,
     pub gravity_strength:    f32,
+    pub auto_align:          bool,
+    pub auto_align_speed:    f32,
+    pub auto_align_threshold: f32,
+    pub ignore_zoom:         bool,
     pub gravity_influence_mult: f32,
     pub gravity_falloff:     GravityFalloff,
     pub gravity_all_sources: bool,
@@ -74,29 +81,162 @@ pub struct GameObject {
 
 impl OnEvent for GameObject {}
 
-impl Component for GameObject {
-    fn children(&self) -> Vec<&dyn Drawable> {
-        if self.visible {
-            let mut result = Vec::new();
-            if let Some(d) = &self.drawable { result.push(d.as_ref() as &dyn Drawable); }
-            if let Some(g) = &self.glow_drawable { result.push(g.as_ref() as &dyn Drawable); }
-            if let Some(t) = &self.tint_drawable { result.push(t.as_ref() as &dyn Drawable); }
-            result
-        } else { vec![] }
+// ── private helpers ───────────────────────────────────────────────────────────
+
+impl GameObject {
+    fn active_children(&self) -> Vec<&dyn Drawable> {
+        if !self.visible { return vec![]; }
+        let mut v: Vec<&dyn Drawable> = Vec::new();
+        if let Some(d) = &self.drawable      { v.push(d.as_ref()); }
+        if let Some(g) = &self.glow_drawable  { v.push(g.as_ref()); }
+        if let Some(t) = &self.tint_drawable  { v.push(t.as_ref()); }
+        v
     }
-    fn children_mut(&mut self) -> Vec<&mut dyn Drawable> {
-        if self.visible {
-            let mut result = Vec::new();
-            if let Some(d) = &mut self.drawable { result.push(d.as_mut() as &mut dyn Drawable); }
-            if let Some(g) = &mut self.glow_drawable { result.push(g.as_mut() as &mut dyn Drawable); }
-            if let Some(t) = &mut self.tint_drawable { result.push(t.as_mut() as &mut dyn Drawable); }
-            result
-        } else { vec![] }
+
+    fn active_children_mut(&mut self) -> Vec<&mut dyn Drawable> {
+        if !self.visible { return vec![]; }
+        let mut v: Vec<&mut dyn Drawable> = Vec::new();
+        if let Some(d) = &mut self.drawable      { v.push(d.as_mut()); }
+        if let Some(g) = &mut self.glow_drawable  { v.push(g.as_mut()); }
+        if let Some(t) = &mut self.tint_drawable  { v.push(t.as_mut()); }
+        v
     }
-    fn layout(&self) -> &dyn prism::layout::Layout { &self.layout }
-    fn clipped(&self) -> bool { self.clipped }
-    fn clip_origin(&self) -> Option<prism::drawable::Offset> { self.clip_origin }
+
+    /// Size reported to the parent layout — capped to the clip box when
+    /// clipping is active so we don't push sibling widgets around.
+    fn reported_size(&self) -> Size {
+        if self.ped { self._size.unwrap_or(self.size) } else { self.size }
+    }
+
+    /// Clip rect as `(x0, y0, x1, y1)` in absolute screen space.
+    fn clip_rect(&self, poffset: Offset) -> Rect {
+        let (cx, cy) = self._origin.unwrap_or(poffset);
+        let (cw, ch) = self._size.unwrap_or(self.size);
+        (cx, cy, cx + cw, cy + ch)
+    }
+
+    /// Clip rect expressed relative to a given draw offset, as wgpu_canvas
+    /// expects bounds in the coordinate space of the item being drawn
+    /// (i.e. relative to the CanvasArea.offset, not absolute screen coords).
+    fn clip_rect_relative(&self, poffset: Offset, draw_offset: Offset) -> Rect {
+        let abs = self.clip_rect(poffset);
+        (
+            abs.0 - draw_offset.0,
+            abs.1 - draw_offset.1,
+            abs.2 - draw_offset.0,
+            abs.3 - draw_offset.1,
+        )
+    }
 }
+
+// ── Drawable ──────────────────────────────────────────────────────────────────
+//
+// Fully manual — avoids the blanket `impl<C: Component + OnEvent> Drawable for C`
+// conflict so we can control request_size / build / draw precisely.
+
+impl Drawable for GameObject {
+    fn request_size(&self) -> RequestTree {
+        let child_requests = self.active_children()
+            .into_iter()
+            .map(Drawable::request_size)
+            .collect();
+        // Tell the parent our visible footprint only (clip size when active).
+        RequestTree(SizeRequest::fixed(self.reported_size()), child_requests)
+    }
+
+    fn build(&self, size: Size, request: RequestTree) -> SizedTree {
+        let own_size = request.0.get(size);
+
+        // Children ALWAYS get the full declared size (self.size), never the
+        // clip size. This is the critical fix for scrolling:
+        //
+        // A text object declared 4000px wide needs 4000px to lay out into.
+        // If we passed clip_size (e.g. box_w=580) here instead, branch.0
+        // (the child's resolved size) would be 580px. Then in draw(), the
+        // line:
+        //   bound.2.min(child_offset.0 + child_size.0)
+        // computes:
+        //   clip_right.min(scrolled_left + 580)
+        // When scrolled_left < box_x, that min shrinks the right edge of
+        // the scissor rect, causing text to be cut off before box_x+box_w.
+        //
+        // By giving children self.size, child_size.0 = 4000, so:
+        //   clip_right.min(scrolled_left + 4000) = clip_right  (always)
+        // and we skip the inner re-intersection entirely anyway (see draw).
+        let child_size = self.size;
+
+        SizedTree(
+            own_size,
+            self.active_children()
+                .into_iter()
+                .zip(request.1)
+                .map(|(child, branch)| {
+                    let built = child.build(child_size, branch);
+                    ((0.0_f32, 0.0_f32), built)
+                })
+                .collect(),
+        )
+    }
+
+    fn draw(
+        &self,
+        sized:   &SizedTree,
+        poffset: Offset,
+        bound:   Rect,
+    ) -> Vec<(CanvasArea, CanvasItem)> {
+        if !self.visible { return vec![]; }
+
+        // Tighten the incoming bound to the clip rect once.
+        // After this, `bound` is the final scissor rect for all children.
+        let bound = if self.ped {
+            let cr = self.clip_rect(poffset);
+            let b  = (
+                bound.0.max(cr.0),
+                bound.1.max(cr.1),
+                bound.2.min(cr.2),
+                bound.3.min(cr.3),
+            );
+            if b.2 <= b.0 || b.3 <= b.1 { return vec![]; }
+            b
+        } else {
+            bound
+        };
+
+        sized.1.iter()
+            .zip(self.active_children())
+            .flat_map(|((offset, branch), child)| {
+                let child_offset = (poffset.0 + offset.0, poffset.1 + offset.1);
+
+                // Pass `bound` directly to the child — do NOT re-intersect
+                // with child_offset + child_size. Re-intersecting shrinks
+                // the scissor rect when the child has scrolled left (its
+                // origin is outside the clip window, so adding even a small
+                // child_size can land short of clip_rect.x1). The clip rect
+                // is already fully encoded in `bound` above.
+                child.draw(branch, child_offset, bound)
+            })
+            .collect()
+    }
+
+    fn event(&mut self, ctx: &mut Context, sized: &SizedTree, event: Box<dyn Event>) {
+        let areas: Vec<Area> = sized.1.iter()
+            .map(|(o, branch)| Area { offset: *o, size: branch.0 })
+            .collect();
+
+        let events = OnEvent::on_event(self, ctx, sized, event);
+        for ev in events {
+            for (slot, (child, (_, branch))) in
+                ev.pass(ctx, &areas)
+                    .into_iter()
+                    .zip(self.active_children_mut().into_iter().zip(sized.1.iter()))
+            {
+                if let Some(e) = slot { child.event(ctx, branch, e); }
+            }
+        }
+    }
+}
+
+// ── public API ────────────────────────────────────────────────────────────────
 
 impl GameObject {
     pub fn build(id: impl Into<String>) -> GameObjectBuilder {
@@ -109,7 +249,7 @@ impl GameObject {
             rotation_resistance: 0.85, surface_normal: (0.0, -1.0),
             collision_mode: CollisionMode::Surface, highlight: None,
             material: PhysicsMaterial::default(), collision_layer: 0,
-            collision_mask: u32::MAX, clipped: false, clip_origin: None,
+            collision_mask: u32::MAX, clipped: false, clip_origin: None, clip_size: None,
             planet_radius: None, gravity_target: None, gravity_strength: 1.0,
             gravity_influence_mult: 3.0, gravity_falloff: GravityFalloff::default(),
             gravity_all_sources: false, gravity_identity: None,
@@ -119,7 +259,11 @@ impl GameObject {
         }
     }
 
-    fn default_fields(size: (f32, f32), image_path: Option<String>, image_mtime: Option<std::time::SystemTime>) -> Self {
+    fn default_fields(
+        size: (f32, f32),
+        image_path:  Option<String>,
+        image_mtime: Option<std::time::SystemTime>,
+    ) -> Self {
         Self {
             layout: prism::layout::Stack::default(),
             id: String::new(), tags: vec![], drawable: None, animated_sprite: None,
@@ -132,7 +276,7 @@ impl GameObject {
             highlight: None, glow_drawable: None, tint_drawable: None, grounded: false,
             image_path, image_mtime, animation_path: None, animation_mtime: None,
             material: PhysicsMaterial::default(), collision_layer: 0,
-            collision_mask: u32::MAX, clipped: false, clip_origin: None,
+            collision_mask: u32::MAX, ped: false, _origin: None, _size: None,
             planet_radius: None, gravity_target: None, gravity_strength: 1.0,
             gravity_influence_mult: 3.0, gravity_falloff: GravityFalloff::default(),
             gravity_all_sources: false, gravity_dominant_id: None,
@@ -183,13 +327,14 @@ impl GameObject {
         self
     }
 
-    pub fn as_platform(mut self) -> Self { self.is_platform = true; self }
-    pub fn with_tag(mut self, tag: impl Into<String>) -> Self { self.tags.push(tag.into()); self }
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self { self.tags = tags; self }
-    pub fn with_gravity(mut self, gravity: f32) -> Self { self.gravity = gravity; self }
-    pub fn with_momentum(mut self, momentum: (f32, f32)) -> Self { self.momentum = momentum; self }
-    pub fn with_resistance(mut self, resistance: (f32, f32)) -> Self { self.resistance = resistance; self }
-    pub fn clip(mut self) -> Self { self.clipped = true; self }
+    pub fn as_platform(mut self)                              -> Self { self.is_platform = true; self }
+    pub fn with_tag(mut self, tag: impl Into<String>)         -> Self { self.tags.push(tag.into()); self }
+    pub fn with_tags(mut self, tags: Vec<String>)             -> Self { self.tags = tags; self }
+    pub fn with_gravity(mut self, gravity: f32)               -> Self { self.gravity = gravity; self }
+    pub fn with_momentum(mut self, momentum: (f32, f32))      -> Self { self.momentum = momentum; self }
+    pub fn with_resistance(mut self, resistance: (f32, f32))  -> Self { self.resistance = resistance; self }
+    pub fn clip(mut self)                                      -> Self { self.ped = true; self }
+
     pub fn set_gravity(&mut self, gravity: f32) { self.gravity = gravity; }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
@@ -208,8 +353,9 @@ impl GameObject {
         self.drawable = Some(drawable);
     }
 
-    pub fn set_clip(&mut self, clip: bool) { self.clipped = clip; }
-    pub fn set_clip_origin(&mut self, origin: Option<(f32, f32)>) { self.clip_origin = origin; }
+    pub fn set_clip(&mut self, clip: bool)                          { self.ped     = clip; }
+    pub fn set_clip_origin(&mut self, origin: Option<(f32, f32)>)  { self._origin = origin; }
+    pub fn set_clip_size(&mut self, size: Option<(f32, f32)>)      { self._size   = size; }
 
     pub fn update_position(&mut self) {
         self.position.0 += self.momentum.0;
@@ -243,20 +389,20 @@ impl GameObject {
         let rescale = |img: &mut Image, rot: f32| {
             img.shape = match img.shape {
                 ShapeType::Rectangle(stroke, prev, _) => {
-                    let s = (scaled.0/prev.0.max(f32::EPSILON)).min(scaled.1/prev.1.max(f32::EPSILON));
+                    let s = (scaled.0 / prev.0.max(f32::EPSILON)).min(scaled.1 / prev.1.max(f32::EPSILON));
                     ShapeType::Rectangle(stroke * s, scaled, rot)
                 }
                 ShapeType::Ellipse(stroke, prev, _) => {
-                    let s = (scaled.0/prev.0.max(f32::EPSILON)).min(scaled.1/prev.1.max(f32::EPSILON));
+                    let s = (scaled.0 / prev.0.max(f32::EPSILON)).min(scaled.1 / prev.1.max(f32::EPSILON));
                     ShapeType::Ellipse(stroke * s, scaled, rot)
                 }
                 ShapeType::RoundedRectangle(stroke, prev, _, cr) => {
-                    let s = (scaled.0/prev.0.max(f32::EPSILON)).min(scaled.1/prev.1.max(f32::EPSILON));
+                    let s = (scaled.0 / prev.0.max(f32::EPSILON)).min(scaled.1 / prev.1.max(f32::EPSILON));
                     ShapeType::RoundedRectangle(stroke * s, scaled, rot, cr * s)
                 }
             };
         };
-        if let Some(d) = self.drawable.as_mut() { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
+        if let Some(d) = self.drawable.as_mut()      { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
         if let Some(d) = self.glow_drawable.as_mut() { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
         if let Some(d) = self.tint_drawable.as_mut() { if let Some(i) = d.downcast_mut::<Image>() { rescale(i, rotation); } }
     }
@@ -279,12 +425,21 @@ impl GameObject {
         match &self.highlight {
             Some(effect) => {
                 self.glow_drawable = effect.glow.as_ref().map(|glow| {
-                    let pixel = image::RgbaImage::from_pixel(1, 1, image::Rgba([255,255,255,255])).into();
-                    Box::new(Image { shape: self.highlight_shape(glow.width, size), image: pixel, color: Some(glow.color) }) as Box<dyn Drawable>
+                    let pixel = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255])).into();
+                    Box::new(Image {
+                        shape: self.highlight_shape(glow.width, size),
+                        image: pixel,
+                        color: Some(glow.color),
+                    }) as Box<dyn Drawable>
                 });
                 self.tint_drawable = effect.tint.map(|color| {
-                    let pixel: std::sync::Arc<image::RgbaImage> = image::RgbaImage::from_pixel(1, 1, image::Rgba([255,255,255,255])).into();
-                    Box::new(Image { shape: self.highlight_shape(0.0, size), image: pixel, color: Some(color) }) as Box<dyn Drawable>
+                    let pixel: std::sync::Arc<image::RgbaImage> =
+                        image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255])).into();
+                    Box::new(Image {
+                        shape: self.highlight_shape(0.0, size),
+                        image: pixel,
+                        color: Some(color),
+                    }) as Box<dyn Drawable>
                 });
             }
             None => { self.glow_drawable = None; self.tint_drawable = None; }
@@ -341,8 +496,8 @@ impl GameObject {
         match std::fs::read(path) {
             Ok(bytes) => match AnimatedSprite::decode_vec(bytes, size, fps) {
                 Ok(sprite) => {
-                    self.animated_sprite   = Some(sprite);
-                    self.animation_mtime   = Some(mtime);
+                    self.animated_sprite  = Some(sprite);
+                    self.animation_mtime  = Some(mtime);
                     println!("[hot-reload] animation reloaded: {path}");
                 }
                 Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
