@@ -127,13 +127,13 @@ impl Canvas {
             Condition::InGravityField(object_target, planet_target) => {
                 let obj_indices    = self.store.get_indices(object_target);
                 let planet_indices = self.store.get_indices(planet_target);
-                let influence_mult = 3.0_f32;
 
                 obj_indices.iter().any(|&obj_idx| {
                     let obj = match self.store.objects.get(obj_idx) {
                         Some(o) => o,
                         None    => return false,
                     };
+                    let influence_mult = obj.gravity_influence_mult;
                     let obj_cx = obj.position.0 + obj.size.0 * 0.5;
                     let obj_cy = obj.position.1 + obj.size.1 * 0.5;
 
@@ -151,6 +151,52 @@ impl Canvas {
                         let dist_sq = dx * dx + dy * dy;
                         let influence = radius * influence_mult;
                         dist_sq <= influence * influence
+                    })
+                })
+            }
+
+            Condition::HasDominantPlanet(target) => {
+                self.store.get_indices(target).iter().any(|&idx| {
+                    self.store.objects.get(idx)
+                        .map_or(false, |obj| obj.gravity_dominant_id.is_some())
+                })
+            }
+
+            Condition::DominantPlanetIs(object_target, planet_target) => {
+                let planet_names: Vec<String> = self.store.get_indices(planet_target)
+                    .iter()
+                    .filter_map(|&i| self.store.names.get(i).cloned())
+                    .collect();
+
+                self.store.get_indices(object_target).iter().any(|&idx| {
+                    self.store.objects.get(idx)
+                        .and_then(|obj| obj.gravity_dominant_id.as_deref())
+                        .map_or(false, |dom| planet_names.iter().any(|n| n == dom))
+                })
+            }
+
+            Condition::InAnyGravityField(object_target) => {
+                let obj_indices = self.store.get_indices(object_target);
+                obj_indices.iter().any(|&obj_idx| {
+                    let obj = match self.store.objects.get(obj_idx) {
+                        Some(o) => o,
+                        None    => return false,
+                    };
+                    let influence_mult = obj.gravity_influence_mult;
+                    let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+                    let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+                    self.store.objects.iter().any(|planet| {
+                        let radius = match planet.planet_radius {
+                            Some(r) => r,
+                            None    => return false,
+                        };
+                        let planet_cx = planet.position.0 + planet.size.0 * 0.5;
+                        let planet_cy = planet.position.1 + planet.size.1 * 0.5;
+                        let dx = obj_cx - planet_cx;
+                        let dy = obj_cy - planet_cy;
+                        let dist_sq = dx * dx + dy * dy;
+                        let field_r = radius * influence_mult;
+                        dist_sq <= field_r * field_r
                     })
                 })
             }

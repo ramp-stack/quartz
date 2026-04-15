@@ -261,51 +261,189 @@ impl Canvas {
     // -- Planet gravity injection (crystalline path) ------------------------
 
     pub(crate) fn inject_planet_gravity(&mut self) {
-        let planets: Vec<(usize, f32, f32, f32, Vec<String>)> = self.store.objects
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, obj)| {
-                let r = obj.planet_radius?;
-                let cx = obj.position.0 + obj.size.0 * 0.5;
-                let cy = obj.position.1 + obj.size.1 * 0.5;
-                Some((idx, cx, cy, r, obj.tags.clone()))
-            })
-            .collect();
+        struct PlanetSnapshot {
+            id:       String,
+            cx:       f32,
+            cy:       f32,
+            radius:   f32,
+            strength: f32,
+            tags:     Vec<String>,
+        }
+        let planets: Vec<PlanetSnapshot> = self.store.objects.iter().map(|obj| {
+            let cx = obj.position.0 + obj.size.0 * 0.5;
+            let cy = obj.position.1 + obj.size.1 * 0.5;
+            PlanetSnapshot {
+                id:       obj.id.clone(),
+                cx, cy,
+                radius:   obj.planet_radius.unwrap_or(0.0),
+                strength: obj.gravity_strength,
+                tags:     obj.tags.clone(),
+            }
+        })
+        .filter(|p| p.radius > 0.0)
+        .collect();
+
+        struct GravityResult {
+            idx:         usize,
+            fx:          f32,
+            fy:          f32,
+            dominant_id: Option<String>,
+        }
+        let mut results: Vec<GravityResult> = Vec::new();
 
         for (obj_idx, obj) in self.store.objects.iter().enumerate() {
-            let tag = match &obj.gravity_target {
-                Some(t) => t,
-                None    => continue,
-            };
             if !obj.visible || obj.is_platform { continue; }
 
-            let strength = obj.gravity_strength;
-            let obj_cx   = obj.position.0 + obj.size.0 * 0.5;
-            let obj_cy   = obj.position.1 + obj.size.1 * 0.5;
+            let tag_filter: Option<&str> = if obj.gravity_all_sources {
+                None
+            } else {
+                match &obj.gravity_target {
+                    Some(t) => Some(t.as_str()),
+                    None    => continue,
+                }
+            };
 
-            let mut fx = 0.0_f32;
-            let mut fy = 0.0_f32;
+            let obj_strength       = obj.gravity_strength;
+            let obj_influence_mult = obj.gravity_influence_mult;
+            let obj_falloff        = obj.gravity_falloff;
+            let obj_cx             = obj.position.0 + obj.size.0 * 0.5;
+            let obj_cy             = obj.position.1 + obj.size.1 * 0.5;
 
-            for &(planet_idx, pcx, pcy, radius, ref tags) in &planets {
-                if planet_idx == obj_idx { continue; }
-                if !tags.contains(tag) { continue; }
+            let mut total_fx       = 0.0_f32;
+            let mut total_fy       = 0.0_f32;
+            let mut dominant_id: Option<String> = None;
 
-                let dx   = pcx - obj_cx;
-                let dy   = pcy - obj_cy;
-                let dist = (dx * dx + dy * dy).sqrt();
-                if dist < 1.0 { continue; }
-
-                let pull = strength * radius / dist;
-                fx += (dx / dist) * pull;
-                fy += (dy / dist) * pull;
+            // -- First pass: collect per-planet forces and find dominant ------
+            struct PlanetForce {
+                planet_idx: usize,
+                fx:  f32,
+                fy:  f32,
+                surface_dist: f32,
+                planet_radius: f32,
             }
+            let mut planet_forces: Vec<PlanetForce> = Vec::new();
+            let mut dom_pf_idx: Option<usize> = None;
+            let mut dom_surface_dist = f32::MAX;
 
-            if fx != 0.0 || fy != 0.0 {
-                if let Some(solver) = &mut self.crystalline {
-                    solver.apply_force(obj_idx, fx * 60.0, fy * 60.0);
+            for (pi, planet) in planets.iter().enumerate() {
+                if planet.radius <= 0.0 { continue; }
+
+                if let Some(tag) = tag_filter {
+                    if !planet.tags.iter().any(|t| t == tag) { continue; }
+                }
+
+                if let Some((fx, fy, _pull)) = super::physics::compute_gravity_force(
+                    obj_cx, obj_cy,
+                    obj_strength, obj_influence_mult, obj_falloff,
+                    planet.cx, planet.cy, planet.radius, planet.strength,
+                ) {
+                    let dx = obj_cx - planet.cx;
+                    let dy = obj_cy - planet.cy;
+                    let surface_dist = (dx * dx + dy * dy).sqrt() - planet.radius;
+                    if surface_dist < dom_surface_dist {
+                        dom_surface_dist = surface_dist;
+                        dom_pf_idx = Some(planet_forces.len());
+                    }
+                    planet_forces.push(PlanetForce {
+                        planet_idx: pi, fx, fy, surface_dist, planet_radius: planet.radius,
+                    });
                 }
             }
+
+            // -- Second pass: accumulate with nested-field dampening ----------
+            let dampening_mult = if let Some(di) = dom_pf_idx {
+                let dom_r = planet_forces[di].planet_radius;
+                let max_field_surf = dom_r * (obj_influence_mult - 1.0);
+                if max_field_surf > 0.0 {
+                    let depth = 1.0 - (dom_surface_dist / max_field_surf).clamp(0.0, 1.0);
+                    1.0 - depth * super::physics::NESTED_GRAVITY_DAMPENING
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            };
+
+            for (i, pf) in planet_forces.iter().enumerate() {
+                if Some(i) == dom_pf_idx {
+                    total_fx += pf.fx;
+                    total_fy += pf.fy;
+                    dominant_id = Some(planets[pf.planet_idx].id.clone());
+                } else {
+                    total_fx += pf.fx * dampening_mult;
+                    total_fy += pf.fy * dampening_mult;
+                }
+            }
+
+            results.push(GravityResult {
+                idx: obj_idx,
+                fx: total_fx,
+                fy: total_fy,
+                dominant_id,
+            });
         }
+
+        for result in results {
+            if result.fx != 0.0 || result.fy != 0.0 {
+                if let Some(solver) = &mut self.crystalline {
+                    solver.apply_force(result.idx, result.fx * 60.0, result.fy * 60.0);
+                }
+            }
+            if let Some(obj) = self.store.objects.get_mut(result.idx) {
+                obj.gravity_dominant_id = result.dominant_id;
+            }
+        }
+    }
+
+    // -- Gravity query methods ---
+
+    /// Returns the object name of the planet currently exerting the dominant
+    /// gravitational pull on the named object. None when outside all fields.
+    pub fn get_dominant_planet(&self, name: &str) -> Option<&str> {
+        self.get_game_object(name)
+            .and_then(|obj| obj.gravity_dominant_id.as_deref())
+    }
+
+    /// Returns names of all planets currently within the gravity influence field
+    /// of the named object.
+    pub fn planets_in_range(&self, name: &str) -> Vec<&str> {
+        let obj = match self.get_game_object(name) {
+            Some(o) => o,
+            None    => return Vec::new(),
+        };
+        let influence_mult = obj.gravity_influence_mult;
+        let obj_cx = obj.position.0 + obj.size.0 * 0.5;
+        let obj_cy = obj.position.1 + obj.size.1 * 0.5;
+
+        self.store.objects.iter()
+            .zip(self.store.names.iter())
+            .filter_map(|(planet, planet_name)| {
+                let radius = planet.planet_radius?;
+                let pcx = planet.position.0 + planet.size.0 * 0.5;
+                let pcy = planet.position.1 + planet.size.1 * 0.5;
+                let dx = obj_cx - pcx;
+                let dy = obj_cy - pcy;
+                let dist_sq = dx * dx + dy * dy;
+                let field_r = radius * influence_mult;
+                if dist_sq <= field_r * field_r {
+                    Some(planet_name.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// True if the named object is currently within the gravity field of any
+    /// planet matching its gravity_target tag (or any planet if gravity_all_sources).
+    pub fn is_in_gravity_field(&self, name: &str) -> bool {
+        self.get_dominant_planet(name).is_some()
+    }
+
+    /// True if the named object is within the gravity field of ANY planet,
+    /// regardless of gravity_target tag.
+    pub fn is_in_any_gravity_field(&self, name: &str) -> bool {
+        !self.planets_in_range(name).is_empty()
     }
 
     // -- Crystalline tick step --------------------------------------------
@@ -336,7 +474,8 @@ impl Canvas {
         }
 
         // Build particle visuals for the render pipeline.
-        self.rebuild_particle_visuals();
+        // (Moved to events.rs tick loop, after apply_camera_transform,
+        //  so particles use the current frame's zoom/scale.)
 
         // Still run legacy collision events (Collision, BoundaryCollision GameEvents)
         // so the user's event-driven logic continues to work.
@@ -362,16 +501,27 @@ impl Canvas {
             RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])),
         );
 
-        let zoom = self.layout.zoom.get().max(0.01);
+        // Use layout.scale (= base_scale * zoom) so particles match game-object sizing.
+        let scale = self.layout.scale.get().max(0.001);
+
+        // Apply camera offset so particles render in screen space.
+        let (cam_x, cam_y) = self.active_camera
+            .as_ref()
+            .map(|c| c.position)
+            .unwrap_or((0.0, 0.0));
+
         for ps in &self.last_particle_states {
             let (r, g, b, a) = ps.color;
-            let s = ps.size * zoom;
+            let s = ps.size * scale;
             self.particle_images.push(Image {
                 shape: ShapeType::RoundedRectangle(ps.rotation, (s, s), 0.0, s * 0.5),
                 image: Arc::clone(&white_pixel),
                 color: Some(Color(r, g, b, a)),
             });
-            self.layout.particle_offsets.push(ps.position);
+            self.layout.particle_offsets.push((
+                ps.position.0 - cam_x,
+                ps.position.1 - cam_y,
+            ));
             self.particle_render_layers.push(ps.render_layer);
         }
 

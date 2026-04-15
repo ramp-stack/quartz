@@ -30,6 +30,9 @@ pub enum Condition {
     // -- Planet gravity conditions ---
     OnPlanet(Target, Target),
     InGravityField(Target, Target),
+    HasDominantPlanet(Target),
+    DominantPlanetIs(Target, Target),
+    InAnyGravityField(Target),
 }
 
 impl Condition {

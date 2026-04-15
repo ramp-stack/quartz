@@ -25,6 +25,7 @@ pub use types::{
     GlowConfig, HighlightEffect,
     MouseButton, ScrollAxis,
     ConditionOps,
+    GravityFalloff,
 };
 
 pub use canvas::{Canvas, CanvasMode, CanvasLayout};
@@ -82,6 +83,7 @@ pub mod prelude {
         GlowConfig, HighlightEffect,
         MouseButton, ScrollAxis,
         ConditionOps,
+        GravityFalloff,
     };
 
     pub use crate::canvas::{Canvas, CanvasMode, CanvasLayout};

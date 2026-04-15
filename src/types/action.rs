@@ -93,11 +93,18 @@ pub enum Action {
     // -- Camera zoom ---
     SetZoom { value: f32 },
     AddZoom { value: f32 },
+    /// Smooth zoom transition (lerped). Preferred over SetZoom for animated zoom.
+    SmoothZoom { value: f32 },
+    /// Zoom toward a screen-space point with a multiplicative delta.
+    SmoothZoomAt { delta: f32 },
 
     // -- Planet gravity actions ---
     SetGravityStrength { target: Target, value: f32 },
     SetPlanetRadius    { target: Target, value: f32 },
     SetGravityTarget   { target: Target, tag: String },
+    SetGravityInfluenceMult { target: Target, value: f32 },
+    SetGravityFalloff  { target: Target, falloff: crate::types::GravityFalloff },
+    SetGravityAllSources { target: Target, enabled: bool },
 }
 
 impl Action {
@@ -255,6 +262,12 @@ impl Action {
     pub fn add_zoom(value: f32) -> Self {
         Action::AddZoom { value }
     }
+    pub fn smooth_zoom(value: f32) -> Self {
+        Action::SmoothZoom { value }
+    }
+    pub fn smooth_zoom_at(delta: f32) -> Self {
+        Action::SmoothZoomAt { delta }
+    }
     pub fn set_gravity_strength(target: Target, value: f32) -> Self {
         Action::SetGravityStrength { target, value }
     }
@@ -263,5 +276,14 @@ impl Action {
     }
     pub fn set_gravity_target(target: Target, tag: impl Into<String>) -> Self {
         Action::SetGravityTarget { target, tag: tag.into() }
+    }
+    pub fn set_gravity_influence_mult(target: Target, value: f32) -> Self {
+        Action::SetGravityInfluenceMult { target, value }
+    }
+    pub fn set_gravity_falloff(target: Target, falloff: crate::types::GravityFalloff) -> Self {
+        Action::SetGravityFalloff { target, falloff }
+    }
+    pub fn set_gravity_all_sources(target: Target, enabled: bool) -> Self {
+        Action::SetGravityAllSources { target, enabled }
     }
 }
