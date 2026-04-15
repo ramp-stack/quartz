@@ -17,7 +17,7 @@ src/
     helpers.rs              tag queries, object pool, image cache, orbit math
     physics.rs              collision detection/resolution, object update loop
     physics_bridge.rs       Crystalline physics bridge — public Canvas API
-    events.rs               OnEvent impl, tick loop
+    events.rs               OnEvent impl, tick loop, canvas_size, screen_to_virtual
     watch.rs                watch_file, watch_source
     location.rs             Location::resolve_position
 
@@ -237,6 +237,36 @@ Canvas::resume()
 Canvas::is_paused() -> bool
 
 --------------------------------------------------------------------------------
+  CANVAS — Tick Loop  (canvas/events.rs)
+--------------------------------------------------------------------------------
+
+Canvas implements prism::event::OnEvent. The tick loop runs at a fixed
+DELTA_TIME of 0.016 s (≈ 60 Hz) and is skipped entirely when paused.
+
+Each tick executes in this order:
+  1.  on_update callbacks             (callbacks.tick)
+  2.  held-key events                 (process_held_key_events)
+  3.  all Tick GameEvents             (process_all_tick_events)
+  4.  mouse-over events               (process_mouse_over_events, if mouse present)
+  5.  Custom GameEvents               (callbacks.custom)
+  6.  hot-reload poll                 (process_hot_reloads, 0.5 s interval)
+  7.  object update loop              (update_objects — gravity, position, animation)
+  8a. Crystalline physics step        (run_crystalline_step, if enabled)
+  8b. legacy collision resolution     (handle_collisions, otherwise)
+  9.  planet landings                 (handle_planet_landings)
+  10. auto-align                      (apply_auto_align)
+  11. camera transform                (apply_camera_transform)
+  12. sorted-offset sync              (sync_sorted_offsets)
+  13. boundary collision events       (trigger_boundary_collision_events)
+
+Internal helpers in events.rs (pub(crate)):
+  Canvas::process_all_tick_events()
+    Collects and runs the Action from every Tick GameEvent on every object.
+  Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)
+    Converts a raw screen-space position to virtual canvas coordinates,
+    accounting for letterbox padding and the current scale factor.
+
+--------------------------------------------------------------------------------
   CANVAS — Virtual Scale & Text Helpers  (canvas/actions.rs)
 --------------------------------------------------------------------------------
 
@@ -313,14 +343,18 @@ Canvas::modify_str(name, f: impl FnOnce(String) -> String)
 
 Canvas::watch_file<F>(path: impl Into<String>, handler: F)
   F: FnMut(&mut Canvas, &[u8]) + Clone + 'static
-  Fires whenever the file's modification time changes. Poll interval: 0.5 s.
-  Use for config files, theme files, shaders. Images and animations hot-reload
-  automatically when loaded via load_image / load_animation.
+  Registers a file watcher. Fires whenever the file's modification time
+  changes (poll interval: 0.5 s, driven by process_hot_reloads in the tick
+  loop). The handler receives the full file contents as a byte slice.
+  Use for config files, theme files, shaders. Images and animations
+  hot-reload automatically when loaded via load_image / load_animation.
 
 Canvas::watch_source<T>(path: impl Into<String>, target: Shared<T>)
   T: FromSource + Clone + 'static
-  Parses a Rust source file and updates target on every change.
-  Check target.changed() inside on_update to react to the new value.
+  Convenience wrapper over watch_file. Parses the file as a Rust source
+  string via T::from_source(SourceSettings::parse(src)) and writes the
+  result into target on every change. Check target.changed() inside
+  on_update to react to the new value.
   Example:
     cv.watch_source("src/app.rs", settings.clone());
     // inside on_update:
@@ -380,84 +414,31 @@ Canvas::clear_image_cache()
 --------------------------------------------------------------------------------
 
 Canvas::enable_crystalline()
-  Opt-in to Crystalline physics with default config. Call once.
-  After this, tick loop routes through Crystalline instead of legacy.
-
 Canvas::enable_crystalline_with(config: PhysicsConfig)
-  Opt-in with a custom PhysicsConfig.
-
 Canvas::disable_crystalline()
-  Disable Crystalline and return to the legacy physics path.
-
 Canvas::has_crystalline() -> bool
-  Returns true if Crystalline is currently enabled.
-
 Canvas::set_physics_quality(quality: PhysicsQuality)
-  Apply a quality preset (adjusts config substeps + iterations).
-
 Canvas::crystalline_solver() -> Option<&CrystallinePhysics>
-  Direct read access to the solver (advanced).
-
 Canvas::crystalline_solver_mut() -> Option<&mut CrystallinePhysics>
-  Mutable access to the solver (advanced).
-
 Canvas::apply_physics_force(name: &str, fx: f32, fy: f32)
-  Queue a continuous force on a body (applied over timestep, scaled by dt).
-
 Canvas::apply_physics_impulse(name: &str, ix: f32, iy: f32)
-  Queue an instantaneous impulse on a body.
-
 Canvas::wake_body(name: &str)
-  Wake a sleeping body.
-
 Canvas::is_body_sleeping(name: &str) -> bool
-  Check if a body is currently sleeping.
-
 Canvas::get_velocity(name: &str) -> Option<(f32, f32)>
-  Get an object's current velocity (momentum).
-
 Canvas::get_speed(name: &str) -> Option<f32>
-  Get an object's scalar speed (magnitude of velocity).
-
 Canvas::is_body_grounded(name: &str) -> bool
-  Check if a body is grounded (resting on a platform).
-
 Canvas::bodies_in_radius(pos: (f32,f32), radius: f32) -> Vec<String>
-  Return names of all bodies whose center is within radius of pos.
-
 Canvas::apply_radial_force(center: (f32,f32), radius: f32, force: f32)
-  Apply a radial force pushing objects away from center (falloff by distance).
-
 Canvas::apply_radial_impulse(center: (f32,f32), radius: f32, impulse: f32)
-  Apply a radial impulse (instant, for explosions).
-
 Canvas::set_gravity_scale(scale: f32)
-  Set world gravity scale (multiplicative) on the Crystalline solver.
-
 Canvas::get_gravity_scale() -> f32
-  Get the current gravity scale (1.0 if Crystalline not enabled).
-
 Canvas::set_material(name: &str, mat: PhysicsMaterial)
-  Set a game object's physics material by name.
-
 Canvas::add_emitter(emitter: Emitter)
-  Add an emitter to the particle system.
-
 Canvas::remove_emitter(name: &str)
-  Remove a named emitter.
-
 Canvas::attach_emitter_to(emitter_name: &str, object_name: &str)
-  Attach an emitter to a game object so its origin follows each frame.
-
 Canvas::particle_positions() -> &[ParticleState]
-  Returns particle positions from the last step (for rendering).
-
 Canvas::particle_system_mut() -> Option<&mut ParticleSystem>
-  Mutable access to the particle system (advanced).
-
 Canvas::spawn_particle_burst(emitter: &Emitter, count: usize)
-  One-shot burst of particles from an emitter definition.
-  Does NOT add a persistent emitter — particles dissipate on their own.
 
 --------------------------------------------------------------------------------
   CANVAS — Internal (pub(crate)) — called automatically each tick
@@ -473,6 +454,7 @@ Canvas::evaluate_condition(condition: &Condition) -> bool
 Canvas::trigger_collision_events(idx: usize)
 Canvas::trigger_boundary_collision_events(idx: usize)
 Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)
+Canvas::process_all_tick_events()
 Canvas::run_crystalline_step(delta_time: f32)
 Canvas::rebuild_particle_visuals()
 Canvas::apply_directional_gravity()
@@ -509,7 +491,7 @@ Implements prism::layout::Layout.
     mode:             CanvasMode
     scale:            Cell<f32>
     safe_area_offset: Cell<(f32, f32)>
-    actual_size:      Cell<(f32, f32)>   actual window size — updated each frame
+    actual_size:      Cell<(f32, f32)>
 
 --------------------------------------------------------------------------------
   MODULE: Target / Location / Anchor  (types/targeting.rs)
@@ -542,7 +524,6 @@ Location  (enum, Debug, Clone)
   Location::on_target(target: Target, anchor: Anchor, offset: (f32, f32)) -> Location
 
   Location::resolve_position(store: &ObjectStore) -> (f32, f32)   pub(crate)
-    Implemented in canvas/location.rs.
 
 --------------------------------------------------------------------------------
   MODULE: CollisionMode / CollisionShape  (types/collision.rs)
@@ -556,9 +537,9 @@ CollisionShape  (enum, Debug, Clone)
   CollisionShape::circle_auto() -> CollisionShape
 
 CollisionMode  (enum, Debug, Clone)
-  NonPlatform   not treated as a platform
-  Surface       objects land on it; uses surface_normal for resolution
-  Solid(CollisionShape)   full solid; objects cannot pass through any face
+  NonPlatform
+  Surface
+  Solid(CollisionShape)
 
   CollisionMode::non_platform() -> CollisionMode
   CollisionMode::solid() -> CollisionMode
@@ -575,7 +556,6 @@ collision_layers  (module, pub constants)
   TERRAIN:    u32 = 1 << 6
   PARTICLE:   u32 = 1 << 7
   ALL:        u32 = u32::MAX
-  Two non-platform bodies only interact if layer_a & layer_b != 0.
 
 --------------------------------------------------------------------------------
   MODULE: GlowConfig / HighlightEffect  (types/effects.rs)
@@ -612,7 +592,7 @@ Condition  (enum, Debug, Clone)
   Compare(Expr, CompOp, Expr)
   VarExists(String)
   Grounded(Target)
-  Expr(String)          parsed lazily at runtime; use expr_checked to validate
+  Expr(String)
   HasTag(Target, String)
   IsSleeping(Target)
   IsMoving(Target)
@@ -620,8 +600,8 @@ Condition  (enum, Debug, Clone)
   SpeedBelow(Target, f32)
   CrystallineEnabled
   EmitterActive(String)
-  OnPlanet(Target, Target)       object within planet surface radius
-  InGravityField(Target, Target) object within 3x planet radius
+  OnPlanet(Target, Target)
+  InGravityField(Target, Target)
 
   Condition::expr(s: impl Into<String>) -> Condition
   Condition::expr_checked(s: impl Into<String>) -> Result<Condition, String>
@@ -636,178 +616,67 @@ ConditionOps  (trait)
 --------------------------------------------------------------------------------
 
 Action  (enum, Clone, Debug)
-
-  ApplyMomentum    { target: Target, value: (f32, f32) }
-  SetMomentum      { target: Target, value: (f32, f32) }
-  SetResistance    { target: Target, value: (f32, f32) }
-  Spawn            { object: Box<GameObject>, location: Location }
-  Remove           { target: Target }
-  TransferMomentum { from: Target, to: Target, scale: f32 }
-  SetAnimation     { target: Target, animation_bytes: &'static [u8], fps: f32 }
-  Teleport         { target: Target, location: Location }
-  Show             { target: Target }
-  Hide             { target: Target }
-  Toggle           { target: Target }
-  Conditional      { condition: Condition, if_true: Box<Action>,
-                     if_false: Option<Box<Action>> }
-  Custom           { name: String }
-  SetVar           { name: String, value: Expr }
-  ModVar           { name: String, op: MathOp, operand: Expr }
-  Multi(Vec<Action>)
-  PlaySound        { path: String, options: SoundOptions }
-  SetGravity       { target: Target, value: f32 }
-  SetSize          { target: Target, value: (f32, f32) }
-  AddTag           { target: Target, tag: String }
-  RemoveTag        { target: Target, tag: String }
-  SetText          { target: Target, text: Text }
-  Expr(String)
-  SetRotation      { target: Target, value: f32 }
-  SetSlope         { target: Target, left_offset: f32, right_offset: f32,
-                     auto_rotate: bool }
-  AddRotation      { target: Target, value: f32 }
-  ApplyRotation    { target: Target, value: f32 }
-  SetSurfaceNormal { target: Target, nx: f32, ny: f32 }
-  SetCollisionMode { target: Target, mode: CollisionMode }
-  SetGlow          { target: Target, color: Color, width: f32 }
-  ClearGlow        { target: Target }
-  SetTint          { target: Target, color: Color }
-  ClearTint        { target: Target }
-  SetMaterial      { target: Target, material: PhysicsMaterial }
-  SetElasticity    { target: Target, value: f32 }
-  SetFriction      { target: Target, value: f32 }
-  SetDensity       { target: Target, value: f32 }
-  ApplyForce       { target: Target, fx: f32, fy: f32 }
-  ApplyImpulse     { target: Target, ix: f32, iy: f32 }
-  SetPosition      { target: Target, x: f32, y: f32 }
-  SetCameraRelative { target: Target, enabled: bool }
-  WakeBody         { target: Target }
-  FreezeBody       { target: Target }
-  UnfreezeBody     { target: Target }
-  SetCollisionLayer { target: Target, layer: u32 }
-  SetPhysicsQuality { quality: PhysicsQuality }
-  EnableCrystalline
-  DisableCrystalline
-  SpawnEmitter     { emitter: Emitter }
-  RemoveEmitter    { name: String }
-  AttachEmitter    { emitter_name: String, target: Target,
-                     location: Option<Location> }
-  DetachEmitter    { emitter_name: String }
-  SetEmitterRate          { name: String, value: f32 }
-  SetEmitterLifetime      { name: String, value: f32 }
-  SetEmitterVelocity      { name: String, value: (f32, f32) }
-  SetEmitterSpread        { name: String, value: (f32, f32) }
-  SetEmitterSize          { name: String, value: f32 }
-  SetEmitterColor         { name: String, value: (u8, u8, u8, u8) }
-  SetEmitterGravityScale  { name: String, value: f32 }
-  SetEmitterCollision     { name: String, value: CollisionResponse }
-  SetEmitterRenderLayer   { name: String, value: i32 }
-  SetRenderLayer  { target: Target, layer: i32 }
-  SetZoom { value: f32 }
-  AddZoom { value: f32 }
-  SetGravityStrength { target: Target, value: f32 }
-  SetPlanetRadius    { target: Target, value: f32 }
-  SetGravityTarget   { target: Target, tag: String }
+  — (all variants unchanged from previous version) —
 
 Action builder methods:
   Action::expr(s)
   Action::expr_checked(s) -> Result<Action, String>
-  Action::when(cond, if_true, if_false: Option<Action>)
-  Action::when_if(cond, if_true)
-  Action::when_else(cond, if_true, if_false)
+  Action::when / when_if / when_else
   Action::multi(actions: Vec<Action>)
-  Action::set_var(name, value)
-  Action::mod_var(name, op: MathOp, operand)
-  Action::custom(name)
-  Action::show(target) / hide(target) / toggle(target) / remove(target)
-  Action::spawn(object, location) / teleport(target, location)
-  Action::apply_momentum(target, x, y) / set_momentum(target, x, y)
-  Action::set_resistance(target, x, y)
-  Action::set_gravity(target, value)
-  Action::transfer_momentum(from, to, scale)
-  Action::set_size(target, width, height)
-  Action::add_tag(target, tag) / remove_tag(target, tag)
-  Action::set_text(target, text)
-  Action::play_sound(path) / play_sound_with_options(path, options)
-  Action::set_animation(target, animation_bytes, fps)
-  Action::set_rotation(target, value)
-  Action::add_rotation(target, value)
-  Action::apply_rotation(target, value)
-  Action::set_slope(target, left, right, auto_rotate)
-  Action::set_surface_normal(target, nx, ny)
-  Action::set_collision_mode(target, mode)
-  Action::set_glow(target, color, width) / clear_glow(target)
-  Action::set_tint(target, color) / clear_tint(target)
-  Action::set_material(target, material)
-  Action::set_elasticity(target, value)
-  Action::set_friction(target, value)
-  Action::set_density(target, value)
-  Action::apply_force(target, fx, fy)
-  Action::apply_impulse(target, ix, iy)
-  Action::set_position(target, x, y)
-  Action::set_camera_relative(target, enabled)
-  Action::wake_body(target)
-  Action::freeze_body(target) / unfreeze_body(target)
-  Action::set_collision_layer(target, layer)
-  Action::enable_crystalline() / disable_crystalline()
-  Action::spawn_emitter(emitter) / remove_emitter(name)
-  Action::attach_emitter(name, target)
-  Action::attach_emitter_at(name, target, location)
-  Action::detach_emitter(name)
-  Action::set_emitter_rate(name, value)
-  Action::set_emitter_lifetime(name, value)
-  Action::set_emitter_velocity(name, vx, vy)
-  Action::set_emitter_spread(name, sx, sy)
-  Action::set_emitter_size(name, value)
-  Action::set_emitter_color(name, r, g, b, a)
-  Action::set_emitter_gravity_scale(name, value)
-  Action::set_emitter_collision(name, value)
-  Action::set_emitter_render_layer(name, value)
-  Action::set_render_layer(target, layer)
-  Action::set_zoom(value)
-  Action::add_zoom(value)
-  Action::set_gravity_strength(target, value)
-  Action::set_planet_radius(target, value)
-  Action::set_gravity_target(target, tag)
+  Action::set_var / mod_var / custom
+  Action::show / hide / toggle / remove
+  Action::spawn / teleport
+  Action::apply_momentum / set_momentum / set_resistance / set_gravity
+  Action::transfer_momentum
+  Action::set_size / add_tag / remove_tag / set_text
+  Action::play_sound / play_sound_with_options
+  Action::set_animation
+  Action::set_rotation / add_rotation / apply_rotation
+  Action::set_slope / set_surface_normal / set_collision_mode
+  Action::set_glow / clear_glow / set_tint / clear_tint
+  Action::set_material / set_elasticity / set_friction / set_density
+  Action::apply_force / apply_impulse
+  Action::set_position / set_camera_relative
+  Action::wake_body / freeze_body / unfreeze_body
+  Action::set_collision_layer
+  Action::enable_crystalline / disable_crystalline
+  Action::spawn_emitter / remove_emitter / attach_emitter / attach_emitter_at / detach_emitter
+  Action::set_emitter_rate / lifetime / velocity / spread / size / color / gravity_scale /
+          collision / render_layer
+  Action::set_render_layer
+  Action::set_zoom / add_zoom
+  Action::set_gravity_strength / set_planet_radius / set_gravity_target
 
 --------------------------------------------------------------------------------
   MODULE: GameEvent  (types/event.rs)
 --------------------------------------------------------------------------------
 
 GameEvent  (enum, Clone, Debug)
-  All variants carry action: Action and target: Target except Custom.
+  Collision / BoundaryCollision / KeyPress / KeyRelease / KeyHold / Tick /
+  Custom / MousePress / MouseRelease / MouseEnter / MouseLeave / MouseOver /
+  MouseScroll / MouseMove
 
-  Collision         { action: Action, target: Target }
-  BoundaryCollision { action: Action, target: Target }
-  KeyPress          { key: Key, action: Action, target: Target }
-  KeyRelease        { key: Key, action: Action, target: Target }
-  KeyHold           { key: Key, action: Action, target: Target }
-  Tick              { action: Action, target: Target }
-  Custom            { name: String, target: Target }
-    Note: Custom events have no action field. Calling .action() panics.
-    Use Canvas::register_custom_event instead.
-  MousePress        { action: Action, target: Target, button: Option<MouseButton> }
-  MouseRelease      { action: Action, target: Target, button: Option<MouseButton> }
-  MouseEnter        { action: Action, target: Target }
-  MouseLeave        { action: Action, target: Target }
-  MouseOver         { action: Action, target: Target }
-  MouseScroll       { action: Action, target: Target, axis: Option<ScrollAxis> }
-  MouseMove         { action: Action, target: Target }
-
-  Predicate helpers (all return bool):
-    .is_key_press() / .is_key_release() / .is_key_hold()
-    .is_tick() / .is_custom()
-    .is_mouse_press() / .is_mouse_release()
-    .is_mouse_enter() / .is_mouse_leave() / .is_mouse_over()
-    .is_mouse_scroll() / .is_mouse_move()
-
-  Accessors:
-    .key() -> Option<&Key>         Some for KeyPress/KeyRelease/KeyHold, else None
-    .action() -> &Action           panics on Custom variant
-    .custom_name() -> Option<&str> Some for Custom variant, else None
+  Accessors: .key(), .action(), .custom_name()
+  Predicates: .is_key_press(), .is_tick(), .is_mouse_scroll(), etc.
 
 --------------------------------------------------------------------------------
   MODULE: GameObject / GameObjectBuilder  (object/)
 --------------------------------------------------------------------------------
+
+NOTE ON CLIPPING FIELDS
+  The compiled GameObject struct uses internal field names that differ from
+  the builder API. Always use the builder methods and runtime setters — never
+  set clipping fields directly by name.
+
+  Builder method      →  GameObject struct field
+  .clip()             →  ped        (bool)
+  .clip_origin(x, y)  →  _origin    (Option<(f32, f32)>)
+  .clip_size(w, h)    →  _size      (Option<(f32, f32)>)
+
+  Runtime setters (use these in on_update instead of field access):
+  .set_clip(bool)
+  .set_clip_origin(Option<(f32, f32)>)
+  .set_clip_size(Option<(f32, f32)>)
 
 GameObject::build(id: impl Into<String>) -> GameObjectBuilder
   Entry point for the fluent builder.
@@ -815,14 +684,13 @@ GameObject::build(id: impl Into<String>) -> GameObjectBuilder
 Builder methods (all return Self):
   .position(x: f32, y: f32)
   .size(w: f32, h: f32)
-  .tag(tag: impl Into<String>)   may be called multiple times
+  .tag(tag: impl Into<String>)
   .image(img: Image)
-  .layer(id: i32)                    render layer (default 0, lower = behind)
+  .layer(id: i32)
   .gravity(g: f32)
   .momentum(x: f32, y: f32)
   .resistance(x: f32, y: f32)
-  .platform()
-  .floor()
+  .platform() / .floor()
   .ceiling() / .wall_left() / .wall_right()
   .surface(nx: f32, ny: f32)
   .rotation(degrees: f32)
@@ -839,42 +707,32 @@ Builder methods (all return Self):
   .material(mat: PhysicsMaterial)
   .collision_layer(layer: u32)
   .collision_mask(mask: u32)
-  .clip()                            enable child clipping
-  .clip_origin(x: f32, y: f32)      fixed clip origin
-  .planet(radius: f32)              sets planet_radius, solid_circle,
-                                     is_platform=true
+  .clip()                         sets ped = true on the built object
+  .clip_origin(x: f32, y: f32)   sets _origin on the built object
+  .clip_size(w: f32, h: f32)     sets _size on the built object
+  .planet(radius: f32)
   .gravity_target(tag: impl Into<String>)
   .gravity_strength(strength: f32)
-  .auto_align()                      enable planet surface alignment
-  .auto_align_speed(speed: f32)      rotation lerp speed (default 3.0)
-  .auto_align_threshold(threshold: f32)  degrees (default 45.0)
-  .ignore_zoom()                     exempt from camera zoom (for HUD)
-  .gravity_well(radius: f32, strength: f32)  planet_radius + non-solid
+  .auto_align()
+  .auto_align_speed(speed: f32)
+  .auto_align_threshold(threshold: f32)
+  .ignore_zoom()
+  .gravity_well(radius: f32, strength: f32)
   .elasticity(val: f32) / .friction(val: f32) / .density(val: f32)
-  .bouncy()              material preset: PhysicsMaterial::bouncy()
-  .slippery()            material preset: PhysicsMaterial::ice()
-  .heavy()               material preset: PhysicsMaterial::metal()
-  .light()               material preset: PhysicsMaterial::feather()
-  .rubber()              material preset: PhysicsMaterial::rubber()
-  .static_object()       gravity(0).resistance(0,0) — immovable
-  .player_layer()        collision_layer(PLAYER), mask(ALL)
-  .enemy_layer()         collision_layer(ENEMY), mask(PLAYER|PROJ|TERR)
-  .projectile_layer()    collision_layer(PROJECTILE), mask(ENEMY|TERR)
-  .no_collision()        collision_layer(NONE), mask(NONE)
-  .finish() -> GameObject           no Context required
+  .bouncy() / .slippery() / .heavy() / .light() / .rubber()
+  .static_object()
+  .player_layer() / .enemy_layer() / .projectile_layer() / .no_collision()
+  .finish() -> GameObject
   .build(ctx: &mut Context) -> GameObject   alias for finish()
 
 Factory methods (return GameObjectBuilder):
   GameObject::platform(id, w, h, pos: (f32,f32))
-    Pre-configured: platform + static + TERRAIN layer.
   GameObject::trigger_zone(id, w, h, pos: (f32,f32))
-    Pre-configured: no_collision + TRIGGER layer.
   GameObject::gravity_well(id, radius, strength, pos, tag)
-    Pre-configured: gravity_well + static + tagged.
 
 GameObject  (struct, Clone, Debug)
 
-  Public fields:
+  Public fields (use these directly in on_update etc.):
     id:                  String
     position:            (f32, f32)
     size:                (f32, f32)
@@ -884,7 +742,7 @@ GameObject  (struct, Clone, Debug)
     visible:             bool
     is_platform:         bool
     tags:                Vec<String>
-    layer:               i32          render layer (default 0, lower = behind)
+    layer:               i32
     animated_sprite:     Option<AnimatedSprite>
     rotation:            f32
     slope:               Option<(f32, f32)>
@@ -900,34 +758,33 @@ GameObject  (struct, Clone, Debug)
     material:            PhysicsMaterial
     collision_layer:     u32
     collision_mask:      u32
-    clipped:             bool
-    clip_origin:         Option<(f32, f32)>
+    ped:                 bool              clipping enabled flag
+    _origin:             Option<(f32, f32)>   clip rectangle top-left (absolute screen space)
+    _size:               Option<(f32, f32)>   clip rectangle size; None = use object's laid-out size
     planet_radius:       Option<f32>
     gravity_target:      Option<String>
-    gravity_strength:    f32              default 1.0
+    gravity_strength:    f32
     auto_align:          bool
-    auto_align_speed:    f32              default 3.0
-    auto_align_threshold: f32            default 45.0 degrees
-    ignore_zoom:         bool             default false — HUD-mode
+    auto_align_speed:    f32
+    auto_align_threshold: f32
+    ignore_zoom:         bool
 
-  Constructors (legacy):
+  Constructors (legacy — prefer build()):
     GameObject::new(ctx, id, drawable, size: f32, position, tags,
                     momentum, resistance, gravity) -> Self
-      Square object (size x size). Prefer build().
     GameObject::new_rect(ctx, id, drawable, size: (f32,f32), position,
                          tags, momentum, resistance, gravity) -> Self
-      Rectangular object. Prefer build().
 
   Chainable transforms (consume and return Self):
     .with_animation(animated_sprite: AnimatedSprite) -> Self
     .with_image(image: Image) -> Self
-    .as_platform() -> Self                   sets is_platform = true
+    .as_platform() -> Self
     .with_tag(tag: impl Into<String>) -> Self
     .with_tags(tags: Vec<String>) -> Self
     .with_gravity(gravity: f32) -> Self
     .with_momentum(momentum: (f32,f32)) -> Self
     .with_resistance(resistance: (f32,f32)) -> Self
-    .clip() -> Self                          sets clipped = true
+    .clip() -> Self      sets ped = true
 
   Methods:
     .set_gravity(gravity: f32)
@@ -937,27 +794,67 @@ GameObject  (struct, Clone, Debug)
     .set_glow(config: GlowConfig) / .clear_glow()
     .set_tint(color: Color) / .clear_tint()
     .set_highlight(effect: HighlightEffect) / .clear_highlight()
-    .set_clip(clip: bool)
-    .set_clip_origin(origin: Option<(f32, f32)>)
+    .set_clip(clip: bool)                        enable/disable clipping at runtime
+    .set_clip_origin(origin: Option<(f32, f32)>) set clip origin at runtime
+    .set_clip_size(size: Option<(f32, f32)>)     set clip size at runtime
     .sync_rotation_normal()
+      Recomputes surface_normal from the current rotation angle.
     .slope_surface_y(world_x: f32) -> f32
+      Returns the surface Y at the given world X for a sloped platform.
+      Returns position.1 when no slope is set.
     .rotation_from_slope() -> f32
+      Returns the natural rotation angle (degrees) implied by the slope offsets.
     .surface_normal_at(world_x: f32) -> (f32, f32)
+      Returns the surface normal at world_x. For slopes this is computed from
+      the rise/run of the slope; for flat surfaces returns surface_normal.
     .slope_aabb() -> (f32, f32, f32, f32)
+      Returns (x, y, w, h) of the axis-aligned bounding box covering the slope
+      geometry. Falls back to (position, size) when no slope is set.
     .contains_point(pt: (f32, f32)) -> bool
+      True if pt falls within the object's axis-aligned bounding rectangle.
     .check_boundary_collision(canvas_size: (f32, f32)) -> bool
+      True if any edge of the object is at or beyond the canvas boundary.
     .get_anchor_position(anchor: Anchor) -> (f32, f32)
+      Returns the absolute position of the normalised anchor point within the
+      object. Anchor (0,0) = top-left, (1,1) = bottom-right.
+    .apply_rotation_momentum()
+      Advances rotation by rotation_momentum, then damps momentum by
+      rotation_resistance. Clears momentum when it drops below 0.01.
+      Calls sync_rotation_normal() automatically for platform objects.
 
   Internal (pub(crate)):
     .update_animation(delta_time: f32)
     .update_image_shape()
-    .update_text_scale(scale: f32)
     .apply_gravity()
     .update_position()
     .apply_resistance()
-    .apply_rotation_momentum()
     .hot_reload_image(path: &str)
     .hot_reload_animation(path: &str)
+
+CLIPPING USAGE EXAMPLE
+  To clip a scrolling text object to a container box:
+
+    let mut o = GameObject::build("box_text")
+        .position(box_x + pad, box_y + pad)
+        .size(box_w - pad * 2.0, box_h - pad * 2.0)
+        .layer(3)
+        .clip()                         // enables clipping (sets ped = true)
+        .clip_origin(box_x, box_y)      // anchor clip rect to container top-left
+        .clip_size(box_w, box_h)        // lock clip rect to container dimensions
+        .finish();
+    o.set_drawable(Box::new(text));
+    cv.add_game_object("box_text".into(), o);
+
+  In on_update, move the object's position for scrolling but leave the clip
+  origin and size unchanged — the clip window stays fixed to the container:
+
+    if let Some(o) = cv.get_game_object_mut("box_text") {
+        o.position.1 = box_y + pad - sub_offset;
+        o.set_drawable(Box::new(new_text));
+        // o._origin and o._size are NOT touched — clip rect stays fixed.
+        // Use o.set_clip_origin / o.set_clip_size only if you need to
+        // reposition the clip window at runtime.
+    }
 
 --------------------------------------------------------------------------------
   MODULE: AnimatedSprite  (sprite.rs)
@@ -971,60 +868,36 @@ AnimatedSprite::from_frames(frames: Vec<RgbaImage>, size: (f32,f32), fps: f32)
 Playback:
   .update(delta_time: f32)
   .get_current_image() -> Image
-  .set_fps(fps: f32)
-  .reset()
-  .frame_count() -> usize
-  .set_frame(frame: usize)
-  .fps() -> f32
+  .set_fps(fps: f32) / .reset() / .frame_count() -> usize
+  .set_frame(frame: usize) / .fps() -> f32
 
 Mirror:
-  .mirror()                        toggle horizontal mirror
-  .set_mirrored(v: bool)
-  .is_mirrored() -> bool
-  .mirror_vertical()               toggle vertical mirror
-  .set_mirrored_vertical(v: bool)
-  .is_mirrored_vertical() -> bool
+  .mirror() / .set_mirrored(v: bool) / .is_mirrored() -> bool
+  .mirror_vertical() / .set_mirrored_vertical(v: bool) / .is_mirrored_vertical() -> bool
 
-Draw-time rotation (not baked into pixels):
+Draw-time rotation:
   .set_rotation(options: RotationOptions)
   .rotate_by(options: RotationOptions)
   .clear_rotation()
   .rotation_degrees() -> f32
 
-Baked rotation (modifies pixel data, swaps width/height):
-  .rotate_90_cw()
-  .rotate_90_ccw()
-  .rotate_180()
+Baked rotation:
+  .rotate_90_cw() / .rotate_90_ccw() / .rotate_180()
 
 RotationOptions  (struct, Clone, Copy, Debug)
   Fields: degrees: f32, direction: RotationDirection
+  RotationOptions::clockwise(degrees) / counter_clockwise(degrees) / degrees(degrees)
 
-  RotationOptions::clockwise(degrees: f32) -> RotationOptions
-  RotationOptions::counter_clockwise(degrees: f32) -> RotationOptions
-  RotationOptions::degrees(degrees: f32) -> RotationOptions
-
-RotationDirection  (enum, Clone, Copy, Debug, PartialEq)
-  Clockwise, CounterClockwise
+RotationDirection  (enum)  Clockwise, CounterClockwise
 
 --------------------------------------------------------------------------------
   IMAGE UTILITIES  (sprite.rs)
 --------------------------------------------------------------------------------
 
 load_image(path: &str) -> Image
-  Registers path for automatic hot-reload.
-
 load_image_sized(path: &str, w: f32, h: f32) -> Image
-  Registers path for automatic hot-reload.
-
 load_animation(path: &str, size: (f32,f32), fps: f32) -> AnimatedSprite
-  Registers path for automatic hot-reload.
-
-flip_horizontal(img: Image) -> Image
-flip_vertical(img: Image) -> Image
-rotate_cw(img: Image) -> Image
-rotate_ccw(img: Image) -> Image
-rotate_180(img: Image) -> Image
-
+flip_horizontal / flip_vertical / rotate_cw / rotate_ccw / rotate_180
 solid_circle(size: f32, color: Color) -> Image
 planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image
 planet_grayscale(radius: u32, size: f32) -> Image
@@ -1033,7 +906,6 @@ planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size: f32) 
 glow_ring(w: f32, h: f32, ring_width: f32, corner_radius: f32, color: Color) -> Image
 tint_overlay(w: f32, h: f32, color: Color) -> Image
 star_field(width: u32, height: u32, star_count: u32, seed: u64) -> Image
-  Procedurally generates a starfield image with deterministic placement.
 
 --------------------------------------------------------------------------------
   MODULE: Value / Expr / MathOp / CompOp  (value.rs)
@@ -1041,50 +913,20 @@ star_field(width: u32, height: u32, star_count: u32, seed: u64) -> Image
 
 Value  (enum, Debug, Clone)
   Variants: I8, U8, I16, U16, I32, U32, I64, U64, F32, F64, Usize, Bool, Str
-
   .to_display_string() -> String
-    F32/F64 formatted to 2 decimal places. All others use natural Display.
-    Bool: "true"/"false". Str: returns the inner string.
+  From<T> for all primitive numeric types, bool, &str, String.
 
-  From<T> impls for all primitive numeric types, bool, &str, String.
-
-MathOp  (enum, Debug, Clone)
-  Add, Sub, Mul, Div
-
-CompOp  (enum, Debug, Clone)
-  Eq, Ne, Gt, Lt, Gte, Lte
+MathOp: Add, Sub, Mul, Div
+CompOp: Eq, Ne, Gt, Lt, Gte, Lte
 
 Expr  (enum, Debug, Clone)
-  Lit(Value)
-  Var(String)                 looked up in vars map at eval time
-  Add(Box<Expr>, Box<Expr>)
-  Sub(Box<Expr>, Box<Expr>)
-  Mul(Box<Expr>, Box<Expr>)
-  Div(Box<Expr>, Box<Expr>)
-  Format { template: String, args: Vec<Expr> }
-    Replaces {0}, {1}, ... in template with display strings of each arg.
-
-  Constructors:
-    Expr::var(name) / Expr::str(s) / Expr::bool(b)
-    Expr::u8/i8/u16/i16/u32/i32/u64/i64/f32/f64/usize(n)
-    Expr::add(a, b) / sub(a, b) / mul(a, b) / div(a, b)
-
-  Comparator helpers (produce Condition::Compare):
-    expr.eq(rhs) / expr.ne(rhs)
-    expr.gt(rhs) / expr.lt(rhs)
-    expr.gte(rhs) / expr.lte(rhs)
-
-  From<T> impls mirror Value.
+  Lit(Value) / Var(String) / Add / Sub / Mul / Div / Format { template, args }
+  Constructors: Expr::var / str / bool / u8..usize / add / sub / mul / div
+  Comparators:  expr.eq / ne / gt / lt / gte / lte  → Condition::Compare
 
 resolve_expr(expr: &Expr, vars: &HashMap<String, Value>) -> Option<Value>
-  Evaluates the expression tree. Returns None on missing Var or type mismatch.
-
 apply_op(left: &Value, right: &Value, op: &MathOp) -> Option<Value>
-  Returns None on type mismatch. Integer division by zero returns 0.
-  Float division by 0.0 returns 0.0. String + String concatenates.
-
 compare_operands(left: &Value, right: &Value, op: &CompOp) -> Option<bool>
-  Returns None on type mismatch. Bool only supports Eq and Ne.
 
 --------------------------------------------------------------------------------
   MODULE: Expression Parser  (expr.rs)
@@ -1093,262 +935,66 @@ compare_operands(left: &Value, right: &Value, op: &CompOp) -> Option<bool>
 parse_condition(source: &str) -> Result<Condition, String>
 parse_action(source: &str) -> Result<Vec<Action>, String>
 
-Syntax supports: integers, floats, booleans, strings, variable identifiers,
-+/-/*//, ==, !=, <, <=, >, >=, &&, ||, !, parentheses, and assignment
-operators (=, +=, -=, *=, /=) for action statements.
-
 --------------------------------------------------------------------------------
   MODULE: Scene / SceneManager  (scene.rs)
 --------------------------------------------------------------------------------
 
 Scene::new(name: impl Into<String>) -> Scene
-Scene::with_object(name: impl Into<String>, obj: GameObject) -> Scene
-Scene::with_event(event: GameEvent, target: Target) -> Scene
-Scene::on_enter<F: FnMut(&mut Canvas) + Clone + 'static>(f) -> Scene
-Scene::on_exit<F: FnMut(&mut Canvas) + Clone + 'static>(f) -> Scene
+Scene::with_object / with_event / on_enter / on_exit
 
-SceneManager::new() -> SceneManager
-SceneManager::add_scene(scene: Scene)
-SceneManager::active_scene() -> Option<&str>
-SceneManager::has_scene(name: &str) -> bool
-
-Canvas methods (defined in scene.rs as impl Canvas):
-  Canvas::add_scene(scene: Scene)
-  Canvas::load_scene(name: &str)
-  Canvas::active_scene() -> Option<&str>
-  Canvas::is_scene(name: &str) -> bool
-
-load_scene behaviour:
-  1. Fires on_exit for the current scene.
-  2. Removes all objects belonging to the current scene.
-  3. Adds all objects and events for the new scene.
-  4. Fires on_enter for the new scene.
+Canvas::add_scene / load_scene / active_scene / is_scene
 
 --------------------------------------------------------------------------------
   MODULE: Camera  (camera.rs)
 --------------------------------------------------------------------------------
 
 Camera::new(world_size: (f32,f32), viewport_size: (f32,f32)) -> Camera
-  lerp_speed defaults to 0.10. zoom defaults to 1.0.
-
 Camera::follow(target: Option<Target>)
-  Set or clear the object the camera follows each tick.
-
 Camera::center_on(wx: f32, wy: f32)
-  Instantly reposition camera so (wx, wy) is centred in the viewport,
-  clamped to world bounds. Zoom-aware: visible area = viewport / zoom.
-
-Camera::lerp_toward(wx: f32, wy: f32)   pub(crate)
-  Smooth step toward the given world position each tick. Zoom-aware.
-
-Public fields:
-  position:    (f32, f32)   current camera offset applied to all objects
-  world_size:  (f32, f32)
-  lerp_speed:  f32          default 0.10
-  zoom:        f32          camera zoom factor (default 1.0, >1 = zoom in)
+Fields: position, world_size, lerp_speed (default 0.10), zoom (default 1.0)
 
 --------------------------------------------------------------------------------
   MODULE: SoundOptions / SoundHandle  (sound.rs)
 --------------------------------------------------------------------------------
 
-SoundOptions::new() / SoundOptions::default()
-  Defaults: volume=1.0, looping=false, pitch=1.0, delay=0.0,
-            fade_in=0.0, pan=0.0.
-
-Builder methods (all return Self):
-  .volume(v: f32)
-  .looping(l: bool)
-  .pitch(p: f32)
-  .delay(s: f32)
-  .fade_in(s: f32)
-  .pan(p: f32)   clamped to [-1.0, 1.0]
-
-SoundHandle  (Clone)
-
-  .stop()
-  .pause()
-  .resume()
-  .toggle_pause()
-  .set_volume(volume: f32)
-  .set_speed(speed: f32)
-  .fade_to(target: f32, duration_secs: f32)
-  .fade_out(duration_secs: f32)
-  .is_finished() -> bool
-  .is_paused() -> bool
-  .volume() -> f32
-  .speed() -> f32
-
-spawn_sound(file_path: &str, options: SoundOptions) -> SoundHandle   pub(crate)
-
---------------------------------------------------------------------------------
-  MODULE: ObjectStore  (store.rs)
---------------------------------------------------------------------------------
-
-ObjectStore::new() -> ObjectStore
-
-  .add(name: String, obj: GameObject)
-  .remove(name: &str) -> bool
-  .get_indices(target: &Target) -> Vec<usize>
-  .get_names(target: &Target) -> Vec<String>
-  .apply_to_targets<F: FnMut(&mut GameObject)>(target: &Target, f: F)
-
-Public fields:
-  objects:        Vec<GameObject>
-  names:          Vec<String>
-  name_to_index:  HashMap<String, usize>
-  id_to_index:    HashMap<String, usize>
-  events:         Vec<Vec<GameEvent>>
-  tag_to_indices: HashMap<String, Vec<usize>>
-
---------------------------------------------------------------------------------
-  MODULE: InputState / MouseState / CallbackStore  (input.rs)
---------------------------------------------------------------------------------
-
-InputState::new() -> InputState
-  Fields:
-    held_keys:         HashSet<Key>
-    press_callbacks:   Vec<Box<dyn Callback>>
-    release_callbacks: Vec<Box<dyn Callback>>
-
-MouseState::new() -> MouseState
-  Fields:
-    position:          Option<(f32, f32)>
-    hovered_indices:   HashSet<usize>
-    press_callbacks:   Vec<Box<dyn MouseCallback>>
-    release_callbacks: Vec<Box<dyn MouseCallback>>
-    move_callbacks:    Vec<Box<dyn MouseMoveCallback>>
-    scroll_callbacks:  Vec<Box<dyn MouseScrollCallback>>
-
-CallbackStore::new() -> CallbackStore
-  Fields:
-    tick:   Vec<Box<dyn EventCallback>>
-    custom: HashMap<String, Box<dyn EventCallback>>
-
-Canvas methods (defined in input.rs as impl Canvas):
-  Canvas::on_key_press / on_key_release
-  Canvas::on_mouse_press / on_mouse_release / on_mouse_move / on_mouse_scroll
-  Canvas::mouse_position() -> Option<(f32, f32)>
-  Canvas::is_key_held(key: &Key) -> bool
-
-Internal (pub(crate)):
-  Canvas::handle_keyboard_event(evt: &KeyboardEvent)
-  Canvas::process_key_events<F>(key: &Key, predicate: F)
-  Canvas::process_held_key_events()
-  Canvas::handle_mouse_event(evt: MouseEvent)
-  Canvas::objects_under_cursor(vpos: (f32,f32)) -> Vec<usize>
-  Canvas::update_hover_state(vpos: (f32,f32))
+SoundOptions: .volume / .looping / .pitch / .delay / .fade_in / .pan
+SoundHandle:  .stop / .pause / .resume / .toggle_pause / .set_volume /
+              .set_speed / .fade_to / .fade_out / .is_finished / .is_paused /
+              .volume / .speed
 
 --------------------------------------------------------------------------------
   MODULE: Shared<T>  (file_watcher.rs)
 --------------------------------------------------------------------------------
 
-Shared<T>  (struct, Clone, Debug where T: Debug)
-  Reference-counted shared value built on Rc<RefCell<T>>.
-  All clones share the same underlying value and changed flag.
-  Thread-local (not Send/Sync).
-
 Shared::new(val: T) -> Shared<T>
-
-  .get() -> Ref<'_, T>
+  .get() -> Ref<'_, T>       copy out with * immediately to avoid double-borrow
   .get_mut() -> RefMut<'_, T>
   .update<F: FnOnce(&mut T)>(f)
-  .set(val: T)               replaces inner value and sets changed flag
-  .changed() -> bool         true if set() was called since last check;
-                             resets the flag to false
+  .set(val: T)
+  .changed() -> bool
 
---------------------------------------------------------------------------------
-  MODULE: SourceSettings  (file_watcher.rs)
---------------------------------------------------------------------------------
-
-SourceSettings  (struct, Debug, Clone, Default)
-  Parses a Rust source file into a flat key->value map by scanning lines
-  for the pattern `field_name: <value>,`. Supports string literals, f32,
-  and usize. Lines starting with // or /* are skipped.
-
-SourceSettings::parse(src: &str) -> SourceSettings
-
-  .str(key: &str)   -> Option<String>
-  .f32(key: &str)   -> Option<f32>
-  .usize(key: &str) -> Option<usize>
-
---------------------------------------------------------------------------------
-  TRAIT: FromSource  (file_watcher.rs)
---------------------------------------------------------------------------------
-
-pub trait FromSource: Sized {
-    fn from_source(p: &SourceSettings) -> Self;
-}
-
-  Implement on a settings struct to enable Canvas::watch_source.
-  Receives a parsed SourceSettings and must return a new Self.
-  Example:
-    impl FromSource for MySettings {
-        fn from_source(p: &SourceSettings) -> Self {
-            Self {
-                font_size: p.f32("font_size").unwrap_or(16.0),
-                tab_size:  p.usize("tab_size").unwrap_or(4),
-            }
-        }
-    }
+DOUBLE-BORROW RULE: Never hold a live .get() Ref across a .get_mut() call on
+the same Shared. Always dereference to a plain value first:
+  let val = *shared.get();   // Ref dropped here
+  *shared.get_mut() += val;  // safe
 
 --------------------------------------------------------------------------------
   MODULE: Lerp  (lerp.rs)
 --------------------------------------------------------------------------------
 
-Lerp  (struct, Debug, Clone, Copy)
-  A float value that smoothly chases a target each tick.
-
 Lerp::new(speed: f32) -> Lerp
-  Unbounded. Typical speeds: 0.10 (camera), 0.18 (scroll), 0.25 (snappy).
-
 Lerp::bounded(speed: f32, min: f32, max: f32) -> Lerp
-  Clamped to [min, max]. set() and nudge() clamp automatically.
-
-  Public fields:
-    value:  f32   current animated value — read this each frame
-    target: f32   destination value
-
-  .tick() -> bool
-    Advance one frame. Returns true while still animating, false once
-    value has reached target (within 0.5 units).
-
-  .set(target: f32)
-    Set a new target, clamped to bounds.
-
-  .nudge(delta: f32)
-    Offset the target by delta, staying within bounds.
-
-  .set_bounds(min: f32, max: f32)
-    Update the allowed range and re-clamp current target.
-
-  .snap()
-    Jump value to target instantly with no animation.
-
-  .snap_to(v: f32)
-    Move both value and target to v (clamped). No animation.
+Fields: value, target
+Methods: .tick() / .set(target) / .nudge(delta) / .set_bounds(min, max) /
+         .snap() / .snap_to(v)
 
 --------------------------------------------------------------------------------
   MODULE: Entropy  (entropy.rs)
 --------------------------------------------------------------------------------
 
-Entropy  (struct, Debug, Clone)
-  Deterministic pseudo-random number generator. Accessible on Canvas
-  directly via canvas.entropy.
-
-Entropy::new() -> Entropy           seeded from system time
-Entropy::default() -> Entropy       alias for new()
-Entropy::from_seed(seed: u64) -> Entropy
-Entropy::from_time() -> Entropy
-
-  .seed(seed: u64)
-  .reseed()                         re-seeds from system time
-
-  .next() -> f32                    [0.0, 1.0)
-  .range(min: f32, max: f32) -> f32 [min, max)
-  .int(min: i32, max: i32) -> i32   [min, max] inclusive
-  .chance(probability: f32) -> bool
-  .pick<'a, T>(items: &'a [T]) -> Option<&'a T>
-  .position_in(x: f32, y: f32, w: f32, h: f32) -> (f32, f32)
+Entropy::new() / from_seed(u64) / from_time()
+  .next() / .range(min, max) / .int(min, max) / .chance(p) /
+  .pick(&[T]) / .position_in(x, y, w, h)
 
 ================================================================================
   END OF CORE API REFERENCE
@@ -1358,245 +1004,34 @@ Entropy::from_time() -> Entropy
   MODULE: Crystalline Physics  (crystalline/)
 ================================================================================
 
---------------------------------------------------------------------------------
-  PhysicsMaterial  (crystalline/types.rs)
---------------------------------------------------------------------------------
+PhysicsMaterial: elasticity, friction, density
+  Presets: rubber / ice / metal / wood / stone / bouncy / sticky / glass / feather
 
-PhysicsMaterial  (struct, Clone, Copy, Debug)
-  Fields:
-    elasticity: f32   0.0 = no bounce, 1.0 = full bounce (default 0.0)
-    friction:   f32   surface friction coefficient (default 0.5)
-    density:    f32   mass = density x area (default 1.0)
+PhysicsConfig: fixed_dt, max_substeps, position_iterations, gravity_scale,
+               particle_gravity, particle_max_speed
+  Presets: platformer / floaty / realistic / arcade
 
-  PhysicsMaterial::default() -> Self   { 0.0, 0.5, 1.0 }
+PhysicsQuality: Low / Medium / High
 
-  Presets (all return Self):
-    PhysicsMaterial::rubber()    { 0.8, 0.9, 1.1 }
-    PhysicsMaterial::ice()       { 0.1, 0.05, 0.9 }
-    PhysicsMaterial::metal()     { 0.3, 0.4, 7.8 }
-    PhysicsMaterial::wood()      { 0.4, 0.6, 0.6 }
-    PhysicsMaterial::stone()     { 0.2, 0.7, 2.4 }
-    PhysicsMaterial::bouncy()    { 1.0, 0.3, 0.5 }
-    PhysicsMaterial::sticky()    { 0.0, 1.0, 1.0 }
-    PhysicsMaterial::glass()     { 0.5, 0.2, 2.5 }
-    PhysicsMaterial::feather()   { 0.3, 0.1, 0.01 }
+CrystallinePhysics::new() / with_config(config)
+  .apply_force / apply_impulse / wake / is_sleeping / step
 
---------------------------------------------------------------------------------
-  PhysicsConfig  (crystalline/types.rs)
---------------------------------------------------------------------------------
+Emitter presets: fire / smoke / sparks / rain / snow / dust / explosion /
+                 trail / confetti / bubbles / thruster_exhaust / reentry_sparks /
+                 asteroid_debris / solar_wind / damage_burst
 
-PhysicsConfig  (struct, Clone, Debug)
-  Fields:
-    fixed_dt:            f32   substep size (default 1/240)
-    max_substeps:        u32   cap per frame (default 8)
-    position_iterations: u32   collision solve passes (default 6)
-    gravity_scale:       f32   world gravity multiplier (default 1.0)
-    particle_gravity:    f32   particle gravity in Quartz scale (default 0.5)
-    particle_max_speed:  f32   particle speed cap in px/s (default 1200.0)
+EmitterBuilder::new(name) → .origin / rate / lifetime / velocity / spread /
+                             size / color / gravity_scale / collision /
+                             render_layer / .build() -> Emitter
 
-  Presets (all return Self):
-    PhysicsConfig::platformer()   default values, tight collisions
-    PhysicsConfig::floaty()       gravity_scale 0.3, looser feel
-    PhysicsConfig::realistic()    1/480 dt, 16 substeps, 10 iterations
-    PhysicsConfig::arcade()       1/120 dt, 4 substeps, gravity 1.2
+CollisionResponse: None / Bounce { elasticity } / Die
 
---------------------------------------------------------------------------------
-  PhysicsQuality  (crystalline/types.rs)
---------------------------------------------------------------------------------
+ParticleSystem::new(max_particles)
+  .add_emitter / remove_emitter / has_emitter
+  .spawn_burst / spawn_burst_from_emitter / step
 
-PhysicsQuality  (enum, Clone, Copy, Debug, PartialEq, Eq)
-  Low       fewer substeps/iterations for performance
-  Medium    balanced
-  High      more substeps/iterations for accuracy
-
---------------------------------------------------------------------------------
-  CrystallinePhysics  (crystalline/solver.rs)
---------------------------------------------------------------------------------
-
-CrystallinePhysics  (struct, Clone)
-  The deterministic physics solver. Normally accessed via Canvas bridge
-  methods (enable_crystalline, apply_physics_force, etc.). Direct access
-  available through canvas.crystalline_solver() / _mut().
-
-  CrystallinePhysics::new() -> Self
-    Default config.
-
-  CrystallinePhysics::with_config(config: PhysicsConfig) -> Self
-    Custom config.
-
-  Public field:
-    config: PhysicsConfig    can be read/mutated directly
-
-  .apply_force(body_id: usize, fx: f32, fy: f32)
-    Queue a continuous force (scaled by dt each substep). Wakes the body.
-
-  .apply_impulse(body_id: usize, ix: f32, iy: f32)
-    Queue an instant impulse (added to momentum once). Wakes the body.
-
-  .wake(body_id: usize)
-    Wake a sleeping body.
-
-  .is_sleeping(body_id: usize) -> bool
-    Check if a body is currently sleeping.
-
-  .step(delta: f32, bodies: &[PhysicsBody]) -> PhysicsStepResult
-    Main entry — accumulates delta, runs fixed-dt substeps, returns
-    BodyUpdate vec and collision pairs. Called automatically by Canvas
-    when Crystalline is enabled.
-
-SleepState  (struct, Clone, Debug)
-  Per-body sleeping tracker.
-  Fields: sleeping: bool, frames_at_rest: u16
-
-PhysicsBody  (struct, Clone, Debug)
-  Firewall input struct — Canvas converts GameObjects to PhysicsBodies
-  before passing to the solver. Not constructed directly by users.
-  Fields mirror GameObject physics-relevant subset.
-
-PhysicsStepResult  (struct)
-  Output from CrystallinePhysics::step().
-  Fields: body_updates: Vec<BodyUpdate>, collision_pairs: Vec<(usize, usize)>
-
-BodyUpdate  (struct)
-  Fields: id: usize, position: (f32,f32), momentum: (f32,f32),
-          rotation: f32, rotation_momentum: f32, grounded: bool
-
---------------------------------------------------------------------------------
-  Particle  (crystalline/particles/types.rs)
---------------------------------------------------------------------------------
-
-Particle  (struct, Clone, Debug)
-  Fields:
-    position:           (f32, f32)
-    velocity:           (f32, f32)
-    life:               f32          remaining lifetime
-    max_life:           f32          initial lifetime
-    size:               f32
-    color:              (u8, u8, u8, u8)
-    gravity_scale:      f32          per-particle gravity multiplier
-    rotation:           f32
-    collision_response: CollisionResponse
-    render_layer:       i32
-
-CollisionResponse  (enum, Clone, Debug, Default=None)
-  None                         particles ignore collisions
-  Bounce { elasticity: f32 }   bounce off platforms
-  Die                          destroy on contact
-
---------------------------------------------------------------------------------
-  Emitter  (crystalline/particles/types.rs)
---------------------------------------------------------------------------------
-
-Emitter  (struct, Clone, Debug)
-  Defines a continuous particle source. Add to Canvas via add_emitter().
-
-  Fields:
-    name:               String
-    origin:             (f32, f32)
-    rate:               f32          particles per second
-    lifetime:           f32          seconds each particle lives
-    velocity_base:      (f32, f32)   base velocity
-    velocity_spread:    (f32, f32)   random spread range
-    size:               f32
-    color:              (u8, u8, u8, u8)
-    gravity_scale:      f32          per-particle gravity multiplier
-    collision_response: CollisionResponse
-    rotation:           f32          degrees applied to velocity at emit time
-    render_layer:       i32
-
-  .named(name: impl Into<String>) -> Self
-    Rename an emitter (for use after creating from a preset).
-
-  Presets (all return Self):
-    Emitter::fire(pos)
-    Emitter::smoke(pos)
-    Emitter::sparks(pos)
-    Emitter::rain(canvas_width)
-    Emitter::snow(canvas_width)
-    Emitter::dust(pos)
-    Emitter::explosion(pos)
-    Emitter::trail(color: (u8,u8,u8,u8))
-    Emitter::confetti(pos)
-    Emitter::bubbles(pos)
-    Emitter::thruster_exhaust(pos)
-    Emitter::reentry_sparks(pos)
-    Emitter::asteroid_debris(pos)
-    Emitter::solar_wind(canvas_width)
-    Emitter::damage_burst(pos)
-
---------------------------------------------------------------------------------
-  EmitterBuilder  (crystalline/particles/types.rs)
---------------------------------------------------------------------------------
-
-EmitterBuilder  (struct)
-  Fluent builder for custom emitters.
-
-  EmitterBuilder::new(name: impl Into<String>) -> Self
-    Creates builder with sensible defaults (white, rate 30, life 1.0).
-
-  Builder methods (all return Self):
-    .origin(x: f32, y: f32)
-    .rate(r: f32)
-    .lifetime(l: f32)
-    .velocity(vx: f32, vy: f32)
-    .spread(sx: f32, sy: f32)
-    .size(s: f32)
-    .color(r: u8, g: u8, b: u8, a: u8)
-    .gravity_scale(g: f32)
-    .collision(resp: CollisionResponse)
-    .render_layer(layer: i32)
-    .build() -> Emitter
-
---------------------------------------------------------------------------------
-  ParticleSystem  (crystalline/particles/system.rs)
---------------------------------------------------------------------------------
-
-ParticleSystem  (struct, Clone)
-  Manages all particles and emitters. Normally accessed via Canvas
-  bridge methods (add_emitter, spawn_particle_burst, etc.). Direct
-  access available through canvas.particle_system_mut().
-
-  ParticleSystem::new(max_particles: usize) -> Self
-    Create with a particle count cap.
-
-  .with_config(config: PhysicsConfig) -> Self
-    Set physics config (builder style, consumes self).
-
-  .set_config(&mut self, config: PhysicsConfig)
-    Update config on an existing system.
-
-  .add_emitter(emitter: Emitter)
-  .remove_emitter(name: &str)
-  .has_emitter(name: &str) -> bool
-
-  .spawn_burst(position: (f32,f32), count: usize, template: Particle)
-    Spawn particles at position using a template.
-
-  .spawn_burst_from_emitter(emitter: &Emitter, count: usize)
-    Spawn particles using an emitter's spread/velocity parameters.
-
-  .step(dt: f32, broadphase: Option<&AabbPairFinder>)
-    -> ParticleStepResult
-    Advance particles one frame. Pass None for broadphase to skip
-    particle-platform collision.
-
-ParticleState  (struct, Clone)
-  Render-ready output. Fields: position, size, color, rotation, render_layer
-
-ParticleStepResult  (struct)
-  Output from step(). Field: particles: Vec<ParticleState>
-
---------------------------------------------------------------------------------
-  Planet Gravity Free Functions  (canvas/helpers.rs)
---------------------------------------------------------------------------------
-
-orbit_speed(gravity_strength: f32, planet_radius: f32,
-            orbit_dist: f32) -> f32
-  Approximate orbital speed for a body at orbit_dist above a planet.
-
-escape_speed(gravity_strength: f32, planet_radius: f32,
-             dist: f32) -> f32
-  Approximate escape speed at dist from a planet surface.
+orbit_speed(gravity_strength, planet_radius, orbit_dist) -> f32
+escape_speed(gravity_strength, planet_radius, dist) -> f32
 
 ================================================================================
   END OF API REFERENCE

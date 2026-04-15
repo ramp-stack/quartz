@@ -26,14 +26,15 @@ pub struct GameObjectBuilder {
     pub(super) surface_velocity: Option<f32>,
     pub rotation_momentum:  f32,
     pub rotation_resistance: f32,
-    pub(super) surface_normal: (f32, f32),
-    pub(super) collision_mode: CollisionMode,
-    pub(super) highlight: Option<HighlightEffect>,
-    pub(super) material: PhysicsMaterial,
+    pub(super) surface_normal:  (f32, f32),
+    pub(super) collision_mode:  CollisionMode,
+    pub(super) highlight:       Option<HighlightEffect>,
+    pub(super) material:        PhysicsMaterial,
     pub(super) collision_layer: u32,
-    pub(super) collision_mask: u32,
-    pub(super) clipped: bool,
-    pub(super) clip_origin: Option<(f32, f32)>,
+    pub(super) collision_mask:  u32,
+    pub(super) clipped:         bool,
+    pub(super) clip_origin:     Option<(f32, f32)>,
+    pub(super) clip_size:       Option<(f32, f32)>,
     pub(super) planet_radius:        Option<f32>,
     pub(super) gravity_target:       Option<String>,
     pub(super) gravity_strength:     f32,
@@ -54,12 +55,12 @@ impl GameObjectBuilder {
         self
     }
 
-    pub fn size(mut self, w: f32, h: f32) -> Self { self.size = (w, h); self }
+    pub fn size(mut self, w: f32, h: f32)     -> Self { self.size = (w, h); self }
     pub fn position(mut self, x: f32, y: f32) -> Self { self.position = (x, y); self }
     pub fn tag(mut self, tag: impl Into<String>) -> Self { self.tags.push(tag.into()); self }
-    pub fn momentum(mut self, x: f32, y: f32) -> Self { self.momentum = (x, y); self }
+    pub fn momentum(mut self, x: f32, y: f32)   -> Self { self.momentum = (x, y); self }
     pub fn resistance(mut self, x: f32, y: f32) -> Self { self.resistance = (x, y); self }
-    pub fn gravity(mut self, g: f32) -> Self { self.gravity = g; self }
+    pub fn gravity(mut self, g: f32)             -> Self { self.gravity = g; self }
 
     pub fn platform(mut self) -> Self {
         self.is_platform    = true;
@@ -137,12 +138,18 @@ impl GameObjectBuilder {
         self
     }
     pub fn material(mut self, mat: PhysicsMaterial) -> Self { self.material = mat; self }
-    pub fn collision_layer(mut self, layer: u32) -> Self { self.collision_layer = layer; self }
-    pub fn collision_mask(mut self, mask: u32) -> Self { self.collision_mask = mask; self }
+    pub fn collision_layer(mut self, layer: u32)    -> Self { self.collision_layer = layer; self }
+    pub fn collision_mask(mut self, mask: u32)      -> Self { self.collision_mask = mask; self }
 
-    pub fn clip(mut self) -> Self { self.clipped = true; self }
+    pub fn clip(mut self) -> Self {
+        self.clipped = true;
+        self
+    }
     pub fn clip_origin(mut self, x: f32, y: f32) -> Self {
         self.clip_origin = Some((x, y)); self
+    }
+    pub fn clip_size(mut self, w: f32, h: f32) -> Self {
+        self.clip_size = Some((w, h)); self
     }
 
     pub fn planet(mut self, radius: f32) -> Self {
@@ -166,21 +173,21 @@ impl GameObjectBuilder {
     }
     pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
-        self.planet_radius = Some(radius.max(0.0));
+        self.planet_radius    = Some(radius.max(0.0));
         self.gravity_strength = strength.max(0.0);
-        self.is_platform = false;
-        self.collision_mode = CollisionMode::NonPlatform;
+        self.is_platform      = false;
+        self.collision_mode   = CollisionMode::NonPlatform;
         self
     }
 
     pub fn elasticity(mut self, val: f32) -> Self { self.material.elasticity = val; self }
-    pub fn friction(mut self, val: f32) -> Self { self.material.friction = val; self }
-    pub fn density(mut self, val: f32) -> Self { self.material.density = val; self }
-    pub fn bouncy(self) -> Self { self.material(PhysicsMaterial::bouncy()) }
+    pub fn friction(mut self, val: f32)   -> Self { self.material.friction   = val; self }
+    pub fn density(mut self, val: f32)    -> Self { self.material.density    = val; self }
+    pub fn bouncy(self)   -> Self { self.material(PhysicsMaterial::bouncy()) }
     pub fn slippery(self) -> Self { self.material(PhysicsMaterial::ice()) }
-    pub fn heavy(self) -> Self { self.material(PhysicsMaterial::metal()) }
-    pub fn light(self) -> Self { self.material(PhysicsMaterial::feather()) }
-    pub fn rubber(self) -> Self { self.material(PhysicsMaterial::rubber()) }
+    pub fn heavy(self)    -> Self { self.material(PhysicsMaterial::metal()) }
+    pub fn light(self)    -> Self { self.material(PhysicsMaterial::feather()) }
+    pub fn rubber(self)   -> Self { self.material(PhysicsMaterial::rubber()) }
     pub fn static_object(self) -> Self { self.gravity(0.0).resistance(0.0, 0.0) }
 
     pub fn player_layer(self) -> Self {
@@ -237,10 +244,11 @@ impl GameObjectBuilder {
             material:            self.material,
             collision_layer:     self.collision_layer,
             collision_mask:      self.collision_mask,
-            clipped:             self.clipped,
-            clip_origin:         self.clip_origin,
+            ped:                 self.clipped,
+            _origin:             self.clip_origin,
+            _size:               self.clip_size,
             planet_radius:       self.planet_radius,
-            gravity_target:      self.gravity_target.clone(),
+            gravity_target:      self.gravity_target,
             gravity_strength:    self.gravity_strength,
             auto_align:          self.auto_align,
             auto_align_speed:    self.auto_align_speed,
