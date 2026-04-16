@@ -100,8 +100,19 @@ impl GameObject {
 
     /// Size reported to the parent layout — capped to the clip box when
     /// clipping is active so we don't push sibling widgets around.
+    /// Accounts for rotation so the layout-derived bounds encompass the
+    /// full rotated AABB, preventing the shader bounds-check from clipping
+    /// visible fragments of rotated objects.
     fn reported_size(&self) -> Size {
-        if self.ped { self._size.unwrap_or(self.size) } else { self.size }
+        let base = if self.ped { self._size.unwrap_or(self.size) } else { self.size };
+        if self.rotation == 0.0 {
+            return base;
+        }
+        let theta = self.rotation.to_radians();
+        let cos = theta.cos().abs();
+        let sin = theta.sin().abs();
+        let (w, h) = base;
+        (w * cos + h * sin, w * sin + h * cos)
     }
 
     /// Clip rect as `(x0, y0, x1, y1)` in absolute screen space.
