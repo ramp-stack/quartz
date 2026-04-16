@@ -13,6 +13,7 @@ pub mod canvas;
 pub(crate) mod file_watcher;
 pub mod expr;
 pub mod crystalline;
+pub mod assets;
 
 pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
@@ -36,7 +37,7 @@ pub use object::{GameObject, GameObjectBuilder};
 pub use sprite::{
     AnimatedSprite, RotationOptions, RotationDirection,
     load_image, load_image_sized, load_animation,
-    solid_circle, planet_image,
+    solid_circle, solid_ellipse, planet_image,
     planet_grayscale, with_tint,
     planet_atmosphere, glow_ring, tint_overlay,
     flip_horizontal, flip_vertical,
@@ -61,6 +62,7 @@ pub use crystalline::{
     ParticleSystem, ParticleState, ParticleStepResult,
     Emitter, EmitterBuilder, Particle, CollisionResponse,
 };
+pub use assets::ImageCache;
 pub use entropy::Entropy;
 pub use lerp::Lerp;
 pub use file_watcher::{Shared, SourceSettings, FromSource};
@@ -94,7 +96,7 @@ pub mod prelude {
     pub use crate::sprite::{
         AnimatedSprite, RotationOptions, RotationDirection,
         load_image, load_image_sized, load_animation,
-        solid_circle, planet_image,
+        solid_circle, solid_ellipse, planet_image,
         planet_grayscale, with_tint,
         planet_atmosphere, glow_ring, tint_overlay,
         flip_horizontal, flip_vertical,
@@ -120,6 +122,7 @@ pub mod prelude {
         Emitter, EmitterBuilder, Particle, CollisionResponse,
     };
 
+    pub use crate::assets::ImageCache;
     pub use crate::entropy::Entropy;
     pub use crate::lerp::Lerp;
     pub use crate::file_watcher::{Shared, SourceSettings, FromSource};

@@ -72,11 +72,7 @@ pub struct GameObject {
     pub gravity_all_sources: bool,
     pub gravity_dominant_id: Option<String>,
     pub gravity_identity:    Option<String>,
-    pub auto_align:           bool,
-    pub auto_align_speed:     f32,
-    pub auto_align_threshold: f32,
     pub auto_align_min_depth: f32,
-    pub ignore_zoom:          bool,
 }
 
 impl OnEvent for GameObject {}

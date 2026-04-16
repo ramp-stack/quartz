@@ -13,6 +13,16 @@ pub fn solid_circle(size: f32, color: Color) -> Image {
     }
 }
 
+/// GPU-rendered ellipse: zero CPU rasterization cost.
+/// Uses a 1×1 white pixel with a color tint and `ShapeType::Ellipse` mask.
+pub fn solid_ellipse(w: f32, h: f32, color: Color) -> Image {
+    Image {
+        shape: ShapeType::Ellipse(0.0, (w, h), 0.0),
+        image: RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])).into(),
+        color: Some(color),
+    }
+}
+
 pub fn planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image {
     Image {
         shape: ShapeType::Rectangle(0.0, (size, size), 0.0),

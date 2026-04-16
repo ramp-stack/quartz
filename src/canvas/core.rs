@@ -128,7 +128,7 @@ pub struct Canvas {
     pub(crate) particle_system:           Option<ParticleSystem>,
     pub(crate) last_particle_states:      Vec<ParticleState>,
     pub(crate) particle_images:           Vec<Image>,
-    pub(crate) image_cache:               HashMap<String, Image>,
+    pub(crate) image_cache:               crate::assets::ImageCache,
     pub(crate) emitter_locations:         HashMap<String, crate::types::Location>,
     pub(crate) particle_render_layers:    Vec<i32>,
     pub(crate) render_order:              Vec<RenderSlot>,

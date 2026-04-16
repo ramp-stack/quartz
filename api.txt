@@ -37,6 +37,7 @@ src/
     geometry.rs             boundary/anchor/slope/clip geometry helpers
 
   sprite.rs                 AnimatedSprite, image helpers
+  assets.rs                 ImageCache (general-purpose image cache)
   value.rs                  Value, Expr, MathOp, CompOp
   store.rs                  ObjectStore
   input.rs                  InputState, MouseState, CallbackStore
@@ -426,6 +427,10 @@ Canvas::load_image_cached(path: &str) -> Image
 
 Canvas::load_image_sized_cached(path: &str, w: f32, h: f32) -> Image
   Load a sized image, caching by path+dimensions.
+
+Canvas::get_or_create_image(key: impl Into<String>, f: impl FnOnce() -> Image) -> Image
+  Get a cached image by key, or create it via the closure on a cache miss.
+  This is the primary entry point for procedural image caching.
 
 Canvas::clear_image_cache()
   Clear the entire image cache.
@@ -1098,6 +1103,7 @@ load_image_sized(path: &str, w: f32, h: f32) -> Image
 load_animation(path: &str, size: (f32,f32), fps: f32) -> AnimatedSprite
 flip_horizontal / flip_vertical / rotate_cw / rotate_ccw / rotate_180
 solid_circle(size: f32, color: Color) -> Image
+solid_ellipse(w: f32, h: f32, color: Color) -> Image
 planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image
 planet_grayscale(radius: u32, size: f32) -> Image
 with_tint(image: &Image, color: Color) -> Image
@@ -1236,6 +1242,50 @@ Methods: .tick() / .set(target) / .nudge(delta) / .set_bounds(min, max) /
 Entropy::new() / from_seed(u64) / from_time()
   .next() / .range(min, max) / .int(min, max) / .chance(p) /
   .pick(&[T]) / .position_in(x, y, w, h)
+
+================================================================================
+  MODULE: ImageCache  (assets.rs)
+================================================================================
+
+ImageCache  (struct, Clone, Debug, Default)
+  A general-purpose image cache keyed by string identifiers.
+  Games define their own key conventions (e.g. "circle_48_255_95_210").
+  Because Image uses Arc<RgbaImage>, clones are cheap (reference-count bump).
+
+  An ImageCache is embedded inside Canvas and exposed through convenience
+  methods. You can also create standalone instances for caching outside
+  of the canvas lifecycle.
+
+ImageCache::new() -> ImageCache
+  Create an empty cache.
+
+ImageCache::get_or_create(key: impl Into<String>, f: impl FnOnce() -> Image) -> Image
+  Return a cached image, or generate and cache it via the closure.
+  Primary entry point for procedural image caching.
+
+ImageCache::get(key: &str) -> Option<&Image>
+  Retrieve a previously cached image.
+
+ImageCache::insert(key: impl Into<String>, image: Image)
+  Insert an image into the cache, replacing any existing entry.
+
+ImageCache::remove(key: &str) -> Option<Image>
+  Remove a cached image by key.
+
+ImageCache::contains(key: &str) -> bool
+  Returns true if the cache contains an entry for the given key.
+
+ImageCache::clear()
+  Remove all cached images.
+
+ImageCache::len() -> usize
+  Number of cached images.
+
+ImageCache::is_empty() -> bool
+  Returns true if the cache is empty.
+
+ImageCache::retain(f: impl FnMut(&str, &mut Image) -> bool)
+  Retain only entries for which the predicate returns true.
 
 ================================================================================
   END OF CORE API REFERENCE

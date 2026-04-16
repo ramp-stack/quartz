@@ -55,7 +55,7 @@ impl Canvas {
             particle_system:           None,
             last_particle_states:      Vec::new(),
             particle_images:           Vec::new(),
-            image_cache:               HashMap::new(),
+            image_cache:               crate::assets::ImageCache::new(),
             emitter_locations:         HashMap::new(),
             particle_render_layers:    Vec::new(),
             render_order:              Vec::new(),

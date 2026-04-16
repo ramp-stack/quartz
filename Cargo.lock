@@ -1331,6 +1331,7 @@ dependencies = [
  "prism2",
  "rand 0.8.5",
  "rodio",
+ "wgpu_canvas",
 ]
 
 [[package]]

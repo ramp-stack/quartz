@@ -115,23 +115,18 @@ impl Canvas {
 impl Canvas {
     /// Load an image, caching by path. Subsequent calls return a clone.
     pub fn load_image_cached(&mut self, path: &str) -> Image {
-        if let Some(img) = self.image_cache.get(path) {
-            return img.clone();
-        }
-        let img = crate::sprite::load_image(path);
-        self.image_cache.insert(path.to_string(), img.clone());
-        img
+        self.image_cache.get_or_create(path, || crate::sprite::load_image(path))
     }
 
     /// Load a sized image, caching by path+dimensions.
     pub fn load_image_sized_cached(&mut self, path: &str, w: f32, h: f32) -> Image {
         let key = format!("{}:{}x{}", path, w, h);
-        if let Some(img) = self.image_cache.get(&key) {
-            return img.clone();
-        }
-        let img = crate::sprite::load_image_sized(path, w, h);
-        self.image_cache.insert(key, img.clone());
-        img
+        self.image_cache.get_or_create(key, || crate::sprite::load_image_sized(path, w, h))
+    }
+
+    /// Get or create a cached image by key, calling `f` on a miss.
+    pub fn get_or_create_image(&mut self, key: impl Into<String>, f: impl FnOnce() -> Image) -> Image {
+        self.image_cache.get_or_create(key, f)
     }
 
     /// Clear the image cache.
