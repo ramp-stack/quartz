@@ -73,6 +73,8 @@ pub struct GameObject {
     pub gravity_dominant_id: Option<String>,
     pub gravity_identity:    Option<String>,
     pub auto_align_min_depth: f32,
+    pub align_to_slope:      bool,
+    pub align_to_slope_speed: f32,
 }
 
 impl OnEvent for GameObject {}
@@ -262,6 +264,7 @@ impl GameObject {
             gravity_all_sources: false, gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
             auto_align_min_depth: 0.3,
+            align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
         }
     }
@@ -290,6 +293,7 @@ impl GameObject {
             gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
             auto_align_min_depth: 0.3,
+            align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
         }
     }

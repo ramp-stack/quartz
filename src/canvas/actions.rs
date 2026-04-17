@@ -59,6 +59,7 @@ impl Canvas {
             emitter_locations:         HashMap::new(),
             particle_render_layers:    Vec::new(),
             render_order:              Vec::new(),
+            grapple_constraints:       HashMap::new(),
         }
     }
 
@@ -488,6 +489,26 @@ impl Canvas {
                     self.smooth_zoom(self.get_zoom() * (1.0 + delta));
                 }
             }
+            Action::CameraShake { intensity, duration } => {
+                if let Some(cam) = &mut self.active_camera {
+                    cam.shake(intensity, duration);
+                }
+            }
+            Action::CameraFlash { color, duration } => {
+                if let Some(cam) = &mut self.active_camera {
+                    cam.flash(color, duration);
+                }
+            }
+            Action::CameraFlashWith { color, duration, mode, ease, intensity, freeze_frame } => {
+                if let Some(cam) = &mut self.active_camera {
+                    cam.flash_with(color, duration, mode, ease, intensity, freeze_frame);
+                }
+            }
+            Action::CameraZoomPunch { amount, duration } => {
+                if let Some(cam) = &mut self.active_camera {
+                    cam.zoom_punch(amount, duration);
+                }
+            }
             Action::SetGravityStrength { target, value } => {
                 self.store.apply_to_targets(&target, |obj| { obj.gravity_strength = value.max(0.0); });
             }
@@ -515,6 +536,73 @@ impl Canvas {
                 self.store.apply_to_targets(&target, |obj| {
                     obj.gravity_all_sources = enabled;
                 });
+            }
+
+            // -- Slope alignment actions --
+            Action::SetAlignToSlope { target, enabled } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.align_to_slope = enabled;
+                });
+            }
+            Action::SetAlignToSlopeSpeed { target, value } => {
+                self.store.apply_to_targets(&target, |obj| {
+                    obj.align_to_slope_speed = value.max(0.0);
+                });
+            }
+
+            // -- Grapple constraint actions --
+            Action::AttachGrapple { target, grapple } => {
+                for name in self.store.get_names(&target) {
+                    self.attach_grapple(&name, grapple.clone());
+                }
+            }
+            Action::ReleaseGrapple { target } => {
+                for name in self.store.get_names(&target) {
+                    self.release_grapple(&name);
+                }
+            }
+            Action::SetGrappleLength { target, value } => {
+                for name in self.store.get_names(&target) {
+                    if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                        g.length = value.max(1.0);
+                    }
+                }
+            }
+            Action::SetGrappleStiffness { target, value } => {
+                for name in self.store.get_names(&target) {
+                    if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                        g.stiffness = value.clamp(0.0, 1.0);
+                    }
+                }
+            }
+            Action::SetGrappleDamping { target, value } => {
+                for name in self.store.get_names(&target) {
+                    if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                        g.damping = value.clamp(0.0, 1.0);
+                    }
+                }
+            }
+            Action::SetGrappleAnchor { target, x, y } => {
+                for name in self.store.get_names(&target) {
+                    if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                        g.anchor = (x, y);
+                        g.anchor_object = None;
+                    }
+                }
+            }
+            Action::SetGrappleAnchorObject { target, anchor_object } => {
+                for name in self.store.get_names(&target) {
+                    if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                        g.anchor_object = Some(anchor_object.clone());
+                    }
+                }
+            }
+            Action::SetGrappleSwingBias { target, bias } => {
+                for name in self.store.get_names(&target) {
+                    if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                        g.swing_bias = bias;
+                    }
+                }
             }
         }
     }

@@ -146,7 +146,15 @@ impl Canvas {
             }
         }
 
-        let (cam_x, cam_y) = cam.position;
+        // Advance camera effects (shake, flash, zoom punch).
+        cam.effects.update(1.0 / 60.0);
+
+        // Additive offsets from effects — not fed back into cam.position/zoom.
+        let shake_offset = cam.effects.shake_offset();
+        let zoom_punch   = cam.effects.zoom_punch_amount();
+        let effective_zoom = (cam.zoom + zoom_punch).max(0.01);
+
+        let (cam_x, cam_y) = (cam.position.0 + shake_offset.0, cam.position.1 + shake_offset.1);
         for (idx, obj) in self.store.objects.iter().enumerate() {
             let adj = rotation_adjusted_offset(
                 obj.position, obj.size, obj.rotation, obj.slope.is_some(),
@@ -161,9 +169,53 @@ impl Canvas {
         // Particle offsets are handled by rebuild_particle_visuals (runs after this).
 
         // Propagate camera zoom to the layout so build() scales everything.
-        self.layout.zoom.set(cam.zoom.max(0.01));
+        self.layout.zoom.set(effective_zoom);
+
+        // ── Auto flash overlay ────────────────────────────────────────────────
+        // The engine manages an internal fullscreen object for camera flash.
+        // This way cam.flash() "just works" without user-side wiring.
+        self.drive_flash_overlay(&cam);
 
         self.active_camera = Some(cam);
+    }
+
+    /// Internal name for the auto-managed flash overlay object.
+    const FLASH_OVERLAY_NAME: &'static str = "__quartz_flash_overlay";
+
+    /// Create or update the internal flash overlay so `cam.flash()` renders
+    /// automatically without requiring user-side wiring.
+    fn drive_flash_overlay(&mut self, cam: &crate::camera::Camera) {
+        let overlay_color = cam.effects.flash_overlay_color();
+
+        if let Some(color) = overlay_color {
+            let (vw, vh) = self.layout.canvas_size.get();
+
+            if let Some(&idx) = self.store.name_to_index.get(Self::FLASH_OVERLAY_NAME) {
+                // Update existing overlay
+                let obj = &mut self.store.objects[idx];
+                obj.visible = true;
+                obj.size = (vw, vh);
+                let img = crate::sprite::tint_overlay(vw, vh, color);
+                obj.set_image(img);
+            } else {
+                // Create the overlay object on first flash
+                let img = crate::sprite::tint_overlay(vw, vh, color);
+                let mut obj = crate::object::GameObject::build(Self::FLASH_OVERLAY_NAME)
+                    .position(0.0, 0.0)
+                    .size(vw, vh)
+                    .image(img)
+                    .layer(i32::MAX)
+                    .ignore_zoom()
+                    .finish();
+                obj.collision_mode = crate::types::CollisionMode::NonPlatform;
+                self.add_game_object(Self::FLASH_OVERLAY_NAME.to_string(), obj);
+            }
+        } else {
+            // No active flash — hide the overlay if it exists
+            if let Some(&idx) = self.store.name_to_index.get(Self::FLASH_OVERLAY_NAME) {
+                self.store.objects[idx].visible = false;
+            }
+        }
     }
 
     pub(crate) fn handle_collisions(&mut self) {

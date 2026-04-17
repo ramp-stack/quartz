@@ -88,6 +88,7 @@ impl CrystallinePhysics {
         let mut working: Vec<PhysicsBody> = bodies.to_vec();
         let mut all_collisions: Vec<(usize, usize)> = Vec::new();
         let mut grounded: Vec<bool> = vec![false; working.len()];
+        let mut grounded_normals: Vec<Option<(f32, f32)>> = vec![None; working.len()];
 
         // Ensure sleep_states covers all bodies
         if self.sleep_states.len() < working.len() {
@@ -104,7 +105,7 @@ impl CrystallinePhysics {
         }
 
         while self.accumulator >= fixed && steps < self.config.max_substeps {
-            self.substep(&mut working, fixed, &mut all_collisions, &mut grounded);
+            self.substep(&mut working, fixed, &mut all_collisions, &mut grounded, &mut grounded_normals);
             self.accumulator -= fixed;
             steps += 1;
         }
@@ -145,6 +146,7 @@ impl CrystallinePhysics {
                 rotation: body.rotation,
                 rotation_momentum: body.rotation_momentum,
                 grounded: grounded.get(idx).copied().unwrap_or(false),
+                grounded_surface_normal: grounded_normals.get(idx).copied().flatten(),
             })
             .collect();
 
@@ -163,6 +165,7 @@ impl CrystallinePhysics {
         dt: f32,
         collisions: &mut Vec<(usize, usize)>,
         grounded: &mut [bool],
+        grounded_normals: &mut [Option<(f32, f32)>],
     ) {
         // Grounded is accumulated across substeps — reset happens once
         // in step(), not per substep. Any contact within any substep
@@ -243,7 +246,7 @@ impl CrystallinePhysics {
         for iter in 0..iterations {
             let is_last = iter == iterations - 1;
             for contact in &contacts {
-                solve_contact(bodies, grounded, contact, &self.sleep_states, correction_scale, is_last);
+                solve_contact(bodies, grounded, grounded_normals, contact, &self.sleep_states, correction_scale, is_last);
             }
             for dc in &dynamic_contacts {
                 solve_dynamic_contact(bodies, dc, correction_scale, is_last);

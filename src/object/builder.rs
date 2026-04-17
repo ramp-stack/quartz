@@ -46,6 +46,8 @@ pub struct GameObjectBuilder {
     pub(super) auto_align_speed:     f32,
     pub(super) auto_align_threshold: f32,
     pub(super) auto_align_min_depth: f32,
+    pub(super) align_to_slope:       bool,
+    pub(super) align_to_slope_speed: f32,
     pub(super) ignore_zoom:          bool,
 }
 
@@ -197,6 +199,10 @@ impl GameObjectBuilder {
     pub fn auto_align_min_depth(mut self, depth: f32) -> Self {
         self.auto_align_min_depth = depth.clamp(0.0, 1.0); self
     }
+    pub fn align_to_slope(mut self) -> Self { self.align_to_slope = true; self }
+    pub fn align_to_slope_speed(mut self, speed: f32) -> Self {
+        self.align_to_slope_speed = speed.max(0.0); self
+    }
     pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
         self.planet_radius    = Some(radius.max(0.0));
@@ -285,6 +291,8 @@ impl GameObjectBuilder {
             auto_align_speed:    self.auto_align_speed,
             auto_align_threshold: self.auto_align_threshold,
             auto_align_min_depth: self.auto_align_min_depth,
+            align_to_slope:      self.align_to_slope,
+            align_to_slope_speed: self.align_to_slope_speed,
             ignore_zoom:         self.ignore_zoom,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }

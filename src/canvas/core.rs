@@ -12,6 +12,7 @@ use crate::entropy::Entropy;
 use crate::file_watcher;
 use crate::value::Value;
 use crate::crystalline::{CrystallinePhysics, ParticleSystem, ParticleState};
+use crate::constraints::GrappleConstraint;
 
 
 #[derive(Clone, Copy, Debug)]
@@ -132,6 +133,8 @@ pub struct Canvas {
     pub(crate) emitter_locations:         HashMap<String, crate::types::Location>,
     pub(crate) particle_render_layers:    Vec<i32>,
     pub(crate) render_order:              Vec<RenderSlot>,
+    /// Per-object grapple constraints. Key = game object name.
+    pub(crate) grapple_constraints:       HashMap<String, GrappleConstraint>,
 }
 
 impl std::fmt::Debug for Canvas {

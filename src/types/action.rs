@@ -3,6 +3,8 @@ use crate::object::GameObject;
 use crate::value::{Expr, MathOp};
 use crate::sound::SoundOptions;
 use crate::crystalline::{PhysicsMaterial, PhysicsQuality, Emitter, CollisionResponse};
+use crate::constraints::{GrappleConstraint, SwingBias};
+use crate::camera::{FlashMode, FlashEase};
 use super::targeting::{Target, Location};
 use super::collision::CollisionMode;
 use super::condition::Condition;
@@ -98,6 +100,20 @@ pub enum Action {
     /// Zoom toward a screen-space point with a multiplicative delta.
     SmoothZoomAt { delta: f32 },
 
+    // -- Camera effects ---
+    /// Trigger a camera shake. intensity = world-space pixels, duration = seconds.
+    CameraShake { intensity: f32, duration: f32 },
+    /// Trigger a screen flash. Color fades out over duration seconds.
+    CameraFlash { color: Color, duration: f32 },
+    /// Trigger a screen flash with full control over mode, easing, intensity, and freeze.
+    CameraFlashWith {
+        color: Color, duration: f32,
+        mode: FlashMode, ease: FlashEase,
+        intensity: f32, freeze_frame: f32,
+    },
+    /// Zoom punch — a quick additive zoom pop that decays.
+    CameraZoomPunch { amount: f32, duration: f32 },
+
     // -- Planet gravity actions ---
     SetGravityStrength { target: Target, value: f32 },
     SetPlanetRadius    { target: Target, value: f32 },
@@ -105,6 +121,30 @@ pub enum Action {
     SetGravityInfluenceMult { target: Target, value: f32 },
     SetGravityFalloff  { target: Target, falloff: crate::types::GravityFalloff },
     SetGravityAllSources { target: Target, enabled: bool },
+
+    // -- Slope alignment ---
+    /// Enable/disable slope alignment (flush/slide-like rotation on slopes).
+    SetAlignToSlope      { target: Target, enabled: bool },
+    /// Set the rotation speed for slope alignment (degrees per frame).
+    SetAlignToSlopeSpeed { target: Target, value: f32 },
+
+    // -- Grapple / constraint actions ---
+    /// Attach a grapple constraint to a target object.
+    AttachGrapple   { target: Target, grapple: GrappleConstraint },
+    /// Release (remove) the grapple from a target object.
+    ReleaseGrapple  { target: Target },
+    /// Set the rope length of an active grapple.
+    SetGrappleLength    { target: Target, value: f32 },
+    /// Set the stiffness of an active grapple (0.0–1.0).
+    SetGrappleStiffness { target: Target, value: f32 },
+    /// Set the damping of an active grapple (0.0–1.0).
+    SetGrappleDamping   { target: Target, value: f32 },
+    /// Move the anchor of an active grapple to a new world position.
+    SetGrappleAnchor    { target: Target, x: f32, y: f32 },
+    /// Re-target the grapple anchor to follow a named object.
+    SetGrappleAnchorObject { target: Target, anchor_object: String },
+    /// Set the swing bias of an active grapple.
+    SetGrappleSwingBias { target: Target, bias: SwingBias },
 }
 
 impl Action {
@@ -268,6 +308,22 @@ impl Action {
     pub fn smooth_zoom_at(delta: f32) -> Self {
         Action::SmoothZoomAt { delta }
     }
+    pub fn camera_shake(intensity: f32, duration: f32) -> Self {
+        Action::CameraShake { intensity, duration }
+    }
+    pub fn camera_flash(color: Color, duration: f32) -> Self {
+        Action::CameraFlash { color, duration }
+    }
+    pub fn camera_flash_with(
+        color: Color, duration: f32,
+        mode: FlashMode, ease: FlashEase,
+        intensity: f32, freeze_frame: f32,
+    ) -> Self {
+        Action::CameraFlashWith { color, duration, mode, ease, intensity, freeze_frame }
+    }
+    pub fn camera_zoom_punch(amount: f32, duration: f32) -> Self {
+        Action::CameraZoomPunch { amount, duration }
+    }
     pub fn set_gravity_strength(target: Target, value: f32) -> Self {
         Action::SetGravityStrength { target, value }
     }
@@ -285,5 +341,45 @@ impl Action {
     }
     pub fn set_gravity_all_sources(target: Target, enabled: bool) -> Self {
         Action::SetGravityAllSources { target, enabled }
+    }
+
+    // -- Slope alignment convenience constructors --
+    pub fn set_align_to_slope(target: Target, enabled: bool) -> Self {
+        Action::SetAlignToSlope { target, enabled }
+    }
+    pub fn set_align_to_slope_speed(target: Target, value: f32) -> Self {
+        Action::SetAlignToSlopeSpeed { target, value }
+    }
+
+    // -- Grapple convenience constructors --
+    pub fn attach_grapple(target: Target, grapple: GrappleConstraint) -> Self {
+        Action::AttachGrapple { target, grapple }
+    }
+    pub fn attach_grapple_at(target: Target, anchor: (f32, f32), length: f32) -> Self {
+        Action::AttachGrapple { target, grapple: GrappleConstraint::at_point(anchor, length) }
+    }
+    pub fn attach_grapple_to(target: Target, anchor_object: impl Into<String>, length: f32) -> Self {
+        Action::AttachGrapple { target, grapple: GrappleConstraint::to_object(anchor_object, length) }
+    }
+    pub fn release_grapple(target: Target) -> Self {
+        Action::ReleaseGrapple { target }
+    }
+    pub fn set_grapple_length(target: Target, value: f32) -> Self {
+        Action::SetGrappleLength { target, value }
+    }
+    pub fn set_grapple_stiffness(target: Target, value: f32) -> Self {
+        Action::SetGrappleStiffness { target, value }
+    }
+    pub fn set_grapple_damping(target: Target, value: f32) -> Self {
+        Action::SetGrappleDamping { target, value }
+    }
+    pub fn set_grapple_anchor(target: Target, x: f32, y: f32) -> Self {
+        Action::SetGrappleAnchor { target, x, y }
+    }
+    pub fn set_grapple_anchor_object(target: Target, anchor_object: impl Into<String>) -> Self {
+        Action::SetGrappleAnchorObject { target, anchor_object: anchor_object.into() }
+    }
+    pub fn set_grapple_swing_bias(target: Target, bias: SwingBias) -> Self {
+        Action::SetGrappleSwingBias { target, bias }
     }
 }
