@@ -1,5 +1,6 @@
-use prism::drawable::{Component, Drawable};
+use prism::drawable::{Component, Drawable, SizedTree};
 use prism::layout::{Area, SizeRequest, Layout};
+use prism::canvas::BloomSettings;
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -13,6 +14,7 @@ use crate::file_watcher;
 use crate::value::Value;
 use crate::crystalline::{CrystallinePhysics, ParticleSystem, ParticleState};
 use crate::constraints::GrappleConstraint;
+use crate::lighting::LightingSystem;
 
 
 #[derive(Clone, Copy, Debug)]
@@ -111,6 +113,16 @@ impl Layout for CanvasLayout {
 
 // ── Canvas ───────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug, Default)]
+pub struct PostState {
+    pub bloom: Option<BloomSettings>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GpuFeatureState {
+    pub post: PostState,
+}
+
 #[derive(Clone)]
 pub struct Canvas {
     pub(crate) layout:           CanvasLayout,
@@ -135,6 +147,8 @@ pub struct Canvas {
     pub(crate) render_order:              Vec<RenderSlot>,
     /// Per-object grapple constraints. Key = game object name.
     pub(crate) grapple_constraints:       HashMap<String, GrappleConstraint>,
+    pub(crate) gpu_features:              Option<GpuFeatureState>,
+    pub(crate) lighting:                  Option<LightingSystem>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -169,5 +183,86 @@ impl Component for Canvas {
 
     fn layout(&self) -> &dyn Layout {
         &self.layout
+    }
+
+    fn draw_pre(
+        &self,
+        _sized: &SizedTree,
+        _offset: prism::drawable::Offset,
+        _bound: prism::drawable::Rect,
+    ) -> Vec<(prism::canvas::Area, prism::canvas::Item)> {
+        let Some(ls) = &self.lighting else {
+            return vec![];
+        };
+
+        let (ar, ag, ab, strength, mut lights) = ls.emit_lights();
+
+        // Transform light + occluder positions from game-world space to
+        // screen-logical space so they match the layout-positioned sprites.
+        // The layout applies: screen = (world - cam) * scale + padding.
+        let scale = self.layout.scale.get();
+        let (pad_x, pad_y) = self.layout.safe_area_offset.get();
+        let (cam_x, cam_y) = if let Some(cam) = &self.active_camera {
+            let shake = cam.effects.shake_offset();
+            (cam.position.0 + shake.0, cam.position.1 + shake.1)
+        } else {
+            (0.0, 0.0)
+        };
+
+        for light in &mut lights {
+            light.position = (
+                (light.position.0 - cam_x) * scale + pad_x,
+                (light.position.1 - cam_y) * scale + pad_y,
+            );
+            light.radius *= scale;
+        }
+
+        // Collect shadow occluders from visible platform objects.
+        let occluders: Vec<prism::canvas::ShadowOccluder> = self.store.objects.iter()
+            .filter(|obj| obj.visible && obj.is_platform)
+            .map(|obj| prism::canvas::ShadowOccluder {
+                position: (
+                    (obj.position.0 - cam_x) * scale + pad_x,
+                    (obj.position.1 - cam_y) * scale + pad_y,
+                ),
+                size: (obj.size.0 * scale, obj.size.1 * scale),
+            })
+            .collect();
+
+        vec![(
+            prism::canvas::Area {
+                offset: (0.0, 0.0),
+                bounds: None,
+            },
+            prism::canvas::Item::SetLights {
+                ambient_rgb: (ar, ag, ab),
+                ambient_strength: strength,
+                lights,
+                occluders,
+            },
+        )]
+    }
+
+    fn draw_post(
+        &self,
+        _sized: &SizedTree,
+        _offset: prism::drawable::Offset,
+        _bound: prism::drawable::Rect,
+    ) -> Vec<(prism::canvas::Area, prism::canvas::Item)> {
+        let Some(gpu) = &self.gpu_features else {
+            return vec![];
+        };
+
+        let Some(bloom) = gpu.post.bloom else {
+            return vec![];
+        };
+
+        vec![(
+            prism::canvas::Area {
+                offset: (0.0, 0.0),
+                bounds: None,
+            },
+            prism::canvas::Item::PostBloom(bloom),
+        )]
     }
 }

@@ -75,6 +75,7 @@ pub struct GameObject {
     pub auto_align_min_depth: f32,
     pub align_to_slope:      bool,
     pub align_to_slope_speed: f32,
+    pub unlit:               bool,
 }
 
 impl OnEvent for GameObject {}
@@ -211,7 +212,7 @@ impl Drawable for GameObject {
             bound
         };
 
-        sized.1.iter()
+        let mut items: Vec<(CanvasArea, CanvasItem)> = sized.1.iter()
             .zip(self.active_children())
             .flat_map(|((offset, branch), child)| {
                 let child_offset = (poffset.0 + offset.0, poffset.1 + offset.1);
@@ -224,7 +225,19 @@ impl Drawable for GameObject {
                 // is already fully encoded in `bound` above.
                 child.draw(branch, child_offset, bound)
             })
-            .collect()
+            .collect();
+
+        if self.unlit {
+            items = items.into_iter().map(|(area, item)| {
+                match item {
+                    CanvasItem::Image(img) => (area, CanvasItem::UnlitImage(img)),
+                    CanvasItem::Text(text) => (area, CanvasItem::UnlitText(text)),
+                    other => (area, other),
+                }
+            }).collect();
+        }
+
+        items
     }
 
     fn event(&mut self, ctx: &mut Context, sized: &SizedTree, event: Box<dyn Event>) {
@@ -295,6 +308,7 @@ impl GameObject {
             auto_align_min_depth: 0.3,
             align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
+            unlit: false,
         }
     }
 

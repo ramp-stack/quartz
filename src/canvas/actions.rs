@@ -1,4 +1,5 @@
 use super::core::Canvas;
+use prism::canvas::BloomSettings;
 use prism::event::Key;
 use prism::event::NamedKey;
 use crate::store::ObjectStore;
@@ -60,6 +61,8 @@ impl Canvas {
             particle_render_layers:    Vec::new(),
             render_order:              Vec::new(),
             grapple_constraints:       HashMap::new(),
+            gpu_features:              None,
+            lighting:                  None,
         }
     }
 
@@ -715,4 +718,36 @@ impl Canvas {
     pub fn pause(&mut self)         { self.paused = true; }
     pub fn resume(&mut self)        { self.paused = false; }
     pub fn is_paused(&self) -> bool { self.paused }
+
+    // ── GPU features ─────────────────────────────────────────────────
+
+    pub fn enable_gpu_features(&mut self) {
+        self.gpu_features.get_or_insert_with(super::core::GpuFeatureState::default);
+    }
+
+    pub fn disable_gpu_features(&mut self) {
+        self.gpu_features = None;
+    }
+
+    pub fn has_gpu_features(&self) -> bool {
+        self.gpu_features.is_some()
+    }
+
+    pub fn enable_bloom(&mut self, settings: BloomSettings) {
+        self.enable_gpu_features();
+        self.gpu_features.as_mut().unwrap().post.bloom = Some(settings);
+    }
+
+    pub fn disable_bloom(&mut self) {
+        if let Some(gpu) = &mut self.gpu_features {
+            gpu.post.bloom = None;
+        }
+    }
+
+    pub fn bloom_enabled(&self) -> bool {
+        self.gpu_features
+            .as_ref()
+            .and_then(|g| g.post.bloom)
+            .is_some()
+    }
 }

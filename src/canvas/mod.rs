@@ -7,6 +7,7 @@ pub mod events;
 pub mod watch;
 pub mod location;
 pub mod physics_bridge;
+pub mod lighting_bridge;
 
 // Flatten the public surface: callers use `crate::canvas::Canvas` etc.
 pub use core::{Canvas, CanvasMode, CanvasLayout};

@@ -16,9 +16,10 @@ pub mod crystalline;
 pub mod constraints;
 pub mod assets;
 pub mod timer;
+pub mod lighting;
 
 pub use prism::Context;
-pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
+pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color, BloomSettings, PointLight};
 pub use prism::event::{Key, NamedKey};
 
 pub use types::{
@@ -72,6 +73,11 @@ pub use constraints::{
 };
 pub use assets::ImageCache;
 pub use entropy::Entropy;
+
+pub use lighting::{
+    LightSource, LightType, LightEffect, LightingConfig,
+    AmbientLight, LightAttachment, LightingSystem,
+};
 pub use lerp::Lerp;
 pub use file_watcher::{Shared, SourceSettings, FromSource};
 
@@ -141,6 +147,11 @@ pub mod prelude {
     pub use crate::entropy::Entropy;
     pub use crate::lerp::Lerp;
     pub use crate::file_watcher::{Shared, SourceSettings, FromSource};
+
+    pub use crate::lighting::{
+        LightSource, LightType, LightEffect, LightingConfig,
+        AmbientLight, LightAttachment, LightingSystem,
+    };
 
     pub use crate::value::{
         Expr, Value, MathOp, CompOp,

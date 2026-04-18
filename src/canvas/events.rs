@@ -67,6 +67,7 @@ impl OnEvent for Canvas {
             self.apply_auto_align();
 
             self.apply_camera_transform();
+            self.tick_lighting(DELTA_TIME);
             self.rebuild_particle_visuals();
             self.sync_sorted_offsets();
 

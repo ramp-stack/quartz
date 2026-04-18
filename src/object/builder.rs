@@ -294,6 +294,7 @@ impl GameObjectBuilder {
             align_to_slope:      self.align_to_slope,
             align_to_slope_speed: self.align_to_slope_speed,
             ignore_zoom:         self.ignore_zoom,
+            unlit:               false,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }
         obj
