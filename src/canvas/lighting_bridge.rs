@@ -3,6 +3,7 @@ use crate::lighting::{
     AmbientLight, LightEffect, LightSource, LightingConfig, LightingSystem,
 };
 use prism::canvas::{BloomSettings, Color};
+use wgpu_canvas::capabilities::CapabilitySnapshot;
 
 impl Canvas {
     // ── Lifecycle ────────────────────────────────────────────
@@ -191,5 +192,32 @@ impl Canvas {
         let ls = self.lighting.as_mut().unwrap();
         ls.update_attachments(&positions);
         ls.tick_effects(dt, &mut self.entropy);
+    }
+
+    // ── Option B: Shader source registration ─────────────────────────────────
+
+    /// Queue a WGSL shader source for registration with the GPU renderer.
+    ///
+    /// On the next `draw_pre`, it is emitted as an `EnvelopePayload::RegisterShader`
+    /// item which wgpu_canvas picks up and adds to its `ShaderRegistry`.
+    pub fn register_shader_source(&mut self, id: impl Into<String>, label: impl Into<String>, wgsl_source: impl Into<String>) {
+        self.pending_shader_sources.push((id.into(), label.into(), wgsl_source.into()));
+    }
+
+    /// Clear any queued shader sources after they have been emitted.
+    pub fn clear_pending_shader_sources(&mut self) {
+        self.pending_shader_sources.clear();
+    }
+
+    // ── Option C: Capability snapshot ────────────────────────────────────────
+
+    /// Set the GPU capability snapshot from outside.
+    pub fn set_capability_snapshot(&mut self, snapshot: CapabilitySnapshot) {
+        self.capability_snapshot = Some(snapshot);
+    }
+
+    /// Returns the GPU capability snapshot (conservative defaults if not set).
+    pub fn capabilities(&self) -> CapabilitySnapshot {
+        self.capability_snapshot.clone().unwrap_or_default()
     }
 }

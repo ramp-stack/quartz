@@ -63,6 +63,9 @@ impl Canvas {
             grapple_constraints:       HashMap::new(),
             gpu_features:              None,
             lighting:                  None,
+            pending_shader_sources:    vec![],
+            capability_snapshot:       None,
+            active_post_override:      None,
         }
     }
 
@@ -736,11 +739,35 @@ impl Canvas {
     pub fn enable_bloom(&mut self, settings: BloomSettings) {
         self.enable_gpu_features();
         self.gpu_features.as_mut().unwrap().post.bloom = Some(settings);
+
+        // Register the built-in bloom shader if not already queued.
+        use crate::canvas::builtin_shaders::{BLOOM_SHADER_ID, BLOOM_WGSL};
+        let already = self.pending_shader_sources.iter().any(|(id, _, _)| id == BLOOM_SHADER_ID);
+        if !already {
+            self.pending_shader_sources.push((
+                BLOOM_SHADER_ID.to_string(),
+                "Built-in Bloom".to_string(),
+                BLOOM_WGSL.to_string(),
+            ));
+        }
+
+        // Set the post override to bloom with the current settings.
+        self.active_post_override = Some((
+            BLOOM_SHADER_ID.to_string(),
+            vec![settings.threshold, settings.strength],
+        ));
     }
 
     pub fn disable_bloom(&mut self) {
         if let Some(gpu) = &mut self.gpu_features {
             gpu.post.bloom = None;
+        }
+        // Clear post override only if it's currently bloom.
+        use crate::canvas::builtin_shaders::BLOOM_SHADER_ID;
+        if let Some((ref id, _)) = self.active_post_override {
+            if id == BLOOM_SHADER_ID {
+                self.active_post_override = None;
+            }
         }
     }
 
@@ -749,5 +776,140 @@ impl Canvas {
             .as_ref()
             .and_then(|g| g.post.bloom)
             .is_some()
+    }
+
+    // ── Post-processing API ─────────────────────────────────────────────────
+
+    /// Set a custom post-processing override shader.
+    /// The `shader_id` must already be registered via `register_shader_source`.
+    /// `params` are up to 16 f32 values packed into EffectParams (p0..p3).
+    pub fn set_post_override(&mut self, shader_id: &str, params: Vec<f32>) {
+        self.enable_gpu_features();
+        self.active_post_override = Some((shader_id.to_string(), params));
+    }
+
+    /// Clear the active post-processing override. The post pass will be skipped.
+    pub fn clear_post_override(&mut self) {
+        self.active_post_override = None;
+    }
+
+    /// Enable the built-in night-mode combined shader (bloom + vignette + chromatic aberration).
+    ///
+    /// # Parameters
+    /// - `bloom_threshold`: luminance cutoff for bloom bright extraction
+    /// - `bloom_strength`: bloom intensity multiplier
+    /// - `vignette_strength`: 0.0..1.0, how dark the corners get
+    /// - `vignette_radius`: 0.0..1.0, distance from center where darkening starts
+    /// - `vignette_softness`: how gradual the vignette falloff is
+    /// - `ca_intensity`: chromatic aberration in pixels (0.0 to disable)
+    pub fn enable_night_mode_shader(
+        &mut self,
+        bloom_threshold: f32,
+        bloom_strength: f32,
+        vignette_strength: f32,
+        vignette_radius: f32,
+        vignette_softness: f32,
+        ca_intensity: f32,
+    ) {
+        self.enable_gpu_features();
+        use crate::canvas::builtin_shaders::{NIGHT_MODE_SHADER_ID, NIGHT_MODE_WGSL};
+        let already = self.pending_shader_sources.iter().any(|(id, _, _)| id == NIGHT_MODE_SHADER_ID);
+        if !already {
+            self.pending_shader_sources.push((
+                NIGHT_MODE_SHADER_ID.to_string(),
+                "Built-in Night Mode".to_string(),
+                NIGHT_MODE_WGSL.to_string(),
+            ));
+        }
+        self.active_post_override = Some((
+            NIGHT_MODE_SHADER_ID.to_string(),
+            vec![
+                bloom_threshold, bloom_strength,
+                vignette_strength, vignette_radius,
+                vignette_softness, ca_intensity,
+            ],
+        ));
+    }
+
+    /// Register and enable a built-in vignette post shader.
+    pub fn enable_vignette(&mut self, strength: f32, radius: f32, softness: f32) {
+        self.enable_gpu_features();
+        use crate::canvas::builtin_shaders::{VIGNETTE_SHADER_ID, VIGNETTE_WGSL};
+        let already = self.pending_shader_sources.iter().any(|(id, _, _)| id == VIGNETTE_SHADER_ID);
+        if !already {
+            self.pending_shader_sources.push((
+                VIGNETTE_SHADER_ID.to_string(),
+                "Built-in Vignette".to_string(),
+                VIGNETTE_WGSL.to_string(),
+            ));
+        }
+        self.active_post_override = Some((
+            VIGNETTE_SHADER_ID.to_string(),
+            vec![strength, radius, softness],
+        ));
+    }
+
+    /// Register and enable a built-in chromatic aberration post shader.
+    pub fn enable_chromatic_aberration(&mut self, intensity: f32) {
+        self.enable_gpu_features();
+        use crate::canvas::builtin_shaders::{CHROMATIC_ABERRATION_SHADER_ID, CHROMATIC_ABERRATION_WGSL};
+        let already = self.pending_shader_sources.iter().any(|(id, _, _)| id == CHROMATIC_ABERRATION_SHADER_ID);
+        if !already {
+            self.pending_shader_sources.push((
+                CHROMATIC_ABERRATION_SHADER_ID.to_string(),
+                "Built-in Chromatic Aberration".to_string(),
+                CHROMATIC_ABERRATION_WGSL.to_string(),
+            ));
+        }
+        self.active_post_override = Some((
+            CHROMATIC_ABERRATION_SHADER_ID.to_string(),
+            vec![intensity],
+        ));
+    }
+
+    // ── Light type helpers ────────────────────────────────────────────────────
+
+    /// Set the light type for an existing light.
+    pub fn set_light_type(&mut self, id: &str, light_type: crate::lighting::LightType) {
+        if let Some(light) = self.get_light_mut(id) {
+            light.light_type = light_type;
+        }
+    }
+
+    /// Change only the direction of a Spot or Directional light.
+    /// For Spot: `angle` is cone axis in radians.
+    /// For Directional: sets `direction = (angle.cos(), angle.sin())`.
+    pub fn set_light_direction(&mut self, id: &str, angle: f32) {
+        if let Some(light) = self.get_light_mut(id) {
+            match &mut light.light_type {
+                crate::lighting::LightType::Spot { direction, .. } => {
+                    *direction = angle;
+                }
+                crate::lighting::LightType::Directional { direction } => {
+                    *direction = (angle.cos(), angle.sin());
+                }
+                crate::lighting::LightType::Point => {}
+            }
+        }
+    }
+
+    /// Change only the cone angle of a Spot light (full angle in radians).
+    pub fn set_light_cone_angle(&mut self, id: &str, cone_angle: f32) {
+        if let Some(light) = self.get_light_mut(id) {
+            if let crate::lighting::LightType::Spot { cone_angle: existing, .. } = &mut light.light_type {
+                *existing = cone_angle;
+            }
+        }
+    }
+
+    /// Upgrade a Point light to a Spot light.
+    pub fn make_spotlight(&mut self, id: &str, direction: f32, cone_angle: f32) {
+        self.set_light_type(id, crate::lighting::LightType::Spot { direction, cone_angle });
+    }
+
+    /// Upgrade a light to directional.
+    /// `direction` is a normalized (dx, dy) vector pointing toward the scene.
+    pub fn make_directional(&mut self, id: &str, direction: (f32, f32)) {
+        self.set_light_type(id, crate::lighting::LightType::Directional { direction });
     }
 }

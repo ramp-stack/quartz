@@ -4,6 +4,9 @@ use prism::canvas::BloomSettings;
 use std::cell::Cell;
 use std::collections::HashMap;
 
+use wgpu_canvas::abi::{EnvelopePayload, FrameEnvelope};
+use wgpu_canvas::capabilities::CapabilitySnapshot;
+
 use prism::canvas::Image;
 use crate::store::ObjectStore;
 use crate::input::{InputState, MouseState, CallbackStore};
@@ -149,6 +152,21 @@ pub struct Canvas {
     pub(crate) grapple_constraints:       HashMap<String, GrappleConstraint>,
     pub(crate) gpu_features:              Option<GpuFeatureState>,
     pub(crate) lighting:                  Option<LightingSystem>,
+
+    /// WGSL shader sources accumulated via `register_shader_source()`.
+    /// Each entry is `(id, label, wgsl_source)`.
+    /// Emitted as `EnvelopePayload::RegisterShader` items in `draw_pre`.
+    pub(crate) pending_shader_sources: Vec<(String, String, String)>,
+
+    /// Optional capability snapshot set from outside (e.g., from a startup helper).
+    /// Quartz reads this before emitting commands to avoid unsupported payloads.
+    /// If `None`, Quartz assumes safe conservative defaults.
+    pub(crate) capability_snapshot: Option<CapabilitySnapshot>,
+
+    /// Active post-processing override: `(shader_id, params)`.
+    /// Emitted as `EnvelopePayload::PostOverride` in `draw_pre` each frame.
+    /// Set by `enable_bloom`, custom post shaders, etc.
+    pub(crate) active_post_override: Option<(String, Vec<f32>)>,
 }
 
 impl std::fmt::Debug for Canvas {
@@ -191,15 +209,42 @@ impl Component for Canvas {
         _offset: prism::drawable::Offset,
         _bound: prism::drawable::Rect,
     ) -> Vec<(prism::canvas::Area, prism::canvas::Item)> {
+        let full_area = prism::canvas::Area { offset: (0.0, 0.0), bounds: None };
+        let mut out: Vec<(prism::canvas::Area, prism::canvas::Item)> = vec![];
+
+        // ── Shader registration (Option B) ─────────────────────────────────
+        // Emit any pending shader sources as RegisterShader envelopes.
+        if !self.pending_shader_sources.is_empty() {
+            let payloads: Vec<EnvelopePayload> = self.pending_shader_sources.iter()
+                .map(|(id, label, src)| EnvelopePayload::RegisterShader {
+                    id: id.clone(),
+                    label: label.clone(),
+                    wgsl_source: src.clone(),
+                })
+                .collect();
+            out.push((full_area, prism::canvas::Item::FrameEnvelope(FrameEnvelope::new(payloads))));
+        }
+
+        // ── Post-processing via PostOverride ────────────────────────────────
+        // If bloom (or a custom post shader) is active, emit the PostOverride
+        // envelope so DynamicPostRenderer picks it up.
+        if let Some(ref override_cmd) = self.active_post_override {
+            out.push((full_area, prism::canvas::Item::FrameEnvelope(FrameEnvelope::new(vec![
+                EnvelopePayload::PostOverride {
+                    shader_id: override_cmd.0.clone(),
+                    params: override_cmd.1.clone(),
+                },
+            ]))));
+        }
+
+        // ── Lighting (Options A + C) ────────────────────────────────────────
         let Some(ls) = &self.lighting else {
-            return vec![];
+            return out;
         };
 
         let (ar, ag, ab, strength, mut lights) = ls.emit_lights();
 
-        // Transform light + occluder positions from game-world space to
-        // screen-logical space so they match the layout-positioned sprites.
-        // The layout applies: screen = (world - cam) * scale + padding.
+        // Transform world-space positions to screen-logical space.
         let scale = self.layout.scale.get();
         let (pad_x, pad_y) = self.layout.safe_area_offset.get();
         let (cam_x, cam_y) = if let Some(cam) = &self.active_camera {
@@ -229,18 +274,34 @@ impl Component for Canvas {
             })
             .collect();
 
-        vec![(
-            prism::canvas::Area {
-                offset: (0.0, 0.0),
-                bounds: None,
-            },
+        // Item 1: SetLights carries ambient and occluders only.
+        // Individual point lights are emitted as PatchLight envelopes below.
+        out.push((
+            full_area,
             prism::canvas::Item::SetLights {
                 ambient_rgb: (ar, ag, ab),
                 ambient_strength: strength,
-                lights,
+                lights: vec![],
                 occluders,
             },
-        )]
+        ));
+
+        // Item 2: FrameEnvelope with one PatchLight per active light.
+        let light_payloads: Vec<EnvelopePayload> = lights.iter().enumerate().map(|(i, l)| {
+            EnvelopePayload::PatchLight {
+                id: format!("__quartz_light_{}", i),
+                position: l.position,
+                color: l.color,
+                intensity: l.intensity,
+                radius: l.radius,
+            }
+        }).collect();
+
+        if !light_payloads.is_empty() {
+            out.push((full_area, prism::canvas::Item::FrameEnvelope(FrameEnvelope::new(light_payloads))));
+        }
+
+        out
     }
 
     fn draw_post(
@@ -249,20 +310,8 @@ impl Component for Canvas {
         _offset: prism::drawable::Offset,
         _bound: prism::drawable::Rect,
     ) -> Vec<(prism::canvas::Area, prism::canvas::Item)> {
-        let Some(gpu) = &self.gpu_features else {
-            return vec![];
-        };
-
-        let Some(bloom) = gpu.post.bloom else {
-            return vec![];
-        };
-
-        vec![(
-            prism::canvas::Area {
-                offset: (0.0, 0.0),
-                bounds: None,
-            },
-            prism::canvas::Item::PostBloom(bloom),
-        )]
+        // Post-processing is now handled via PostOverride envelopes in draw_pre.
+        // Item::PostBloom is no longer emitted.
+        vec![]
     }
 }

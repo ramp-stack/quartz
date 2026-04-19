@@ -118,11 +118,26 @@ impl LightSource {
     /// Convert this high-level source to a wgpu_canvas PointLight.
     pub(crate) fn to_point_light(&self) -> prism::canvas::PointLight {
         let (r, g, b) = color_to_rgb(&self.color);
+
+        let kind = match &self.light_type {
+            LightType::Point => wgpu_canvas::LightKind::Point,
+
+            LightType::Spot { direction, cone_angle } => wgpu_canvas::LightKind::Spot {
+                direction: (direction.cos(), direction.sin()),
+                cone_half_angle: cone_angle / 2.0,
+            },
+
+            LightType::Directional { direction } => wgpu_canvas::LightKind::Directional {
+                direction: *direction,
+            },
+        };
+
         prism::canvas::PointLight {
             position: self.position,
             color: (r, g, b),
             radius: self.radius,
             intensity: self.intensity,
+            kind,
         }
     }
 }
