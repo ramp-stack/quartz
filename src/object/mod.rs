@@ -79,6 +79,11 @@ pub struct GameObject {
     /// When `true`, this object is submitted as a GPU shadow occluder each frame.
     /// Independent of physics collision type — a non-platform object can still cast shadows.
     pub shadow_caster:       bool,
+    /// When `true`, the shadow occluder for this object is a circle whose radius
+    /// is `min(size.0, size.1) / 2.0`. Overrides the auto-detection from
+    /// `collision_mode` and is useful for visually circular objects that do
+    /// not carry `CollisionShape::Circle` physics (e.g. hook points).
+    pub shadow_circle:       bool,
 }
 
 impl OnEvent for GameObject {}
@@ -283,6 +288,7 @@ impl GameObject {
             align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
             shadow_caster: false,
+            shadow_circle: false,
         }
     }
 
@@ -314,6 +320,7 @@ impl GameObject {
             ignore_zoom: false,
             unlit: false,
             shadow_caster: false,
+            shadow_circle: false,
         }
     }
 

@@ -50,6 +50,7 @@ pub struct GameObjectBuilder {
     pub(super) align_to_slope_speed: f32,
     pub(super) ignore_zoom:          bool,
     pub(super) shadow_caster:        bool,
+    pub(super) shadow_circle:        bool,
 }
 
 impl GameObjectBuilder {
@@ -210,6 +211,11 @@ impl GameObjectBuilder {
     /// Independent of physics collision — use this for any visible geometry that
     /// should logically block light (walls, obstacles, platforms, decorative objects).
     pub fn casts_shadow(mut self) -> Self { self.shadow_caster = true; self }
+    /// Treat the shadow occluder for this object as a circle.
+    /// Radius is derived from `min(size.0, size.1) / 2.0` at render time.
+    /// Useful for visually circular objects that do not carry `CollisionShape::Circle`
+    /// physics (e.g. decorative balls, hook points).
+    pub fn circle_shadow(mut self) -> Self { self.shadow_circle = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
         self.planet_radius    = Some(radius.max(0.0));
         self.gravity_strength = strength.max(0.0);
@@ -302,6 +308,7 @@ impl GameObjectBuilder {
             ignore_zoom:         self.ignore_zoom,
             unlit:               false,
             shadow_caster:       self.shadow_caster,
+            shadow_circle:       self.shadow_circle,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }
         obj

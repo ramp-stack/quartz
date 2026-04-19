@@ -18,6 +18,7 @@ use crate::value::Value;
 use crate::crystalline::{CrystallinePhysics, ParticleSystem, ParticleState};
 use crate::constraints::GrappleConstraint;
 use crate::lighting::LightingSystem;
+use crate::types::{CollisionMode, CollisionShape};
 
 
 #[derive(Clone, Copy, Debug)]
@@ -265,13 +266,26 @@ impl Component for Canvas {
         // Collect shadow occluders from visible platform objects.
         let occluders: Vec<prism::canvas::ShadowOccluder> = self.store.objects.iter()
             .filter(|obj| obj.visible && obj.shadow_caster)
-            .map(|obj| prism::canvas::ShadowOccluder {
-                position: (
-                    (obj.position.0 - cam_x) * scale + pad_x,
-                    (obj.position.1 - cam_y) * scale + pad_y,
-                ),
-                size: (obj.size.0 * scale, obj.size.1 * scale),
-                rotation: obj.rotation.to_radians(),
+            .map(|obj| {
+                // Determine if this occluder is a circle.
+                // Priority: explicit shadow_circle flag > CollisionShape::Circle physics.
+                let circle_radius = if obj.shadow_circle {
+                    Some((obj.size.0.min(obj.size.1) / 2.0) * scale)
+                } else if let CollisionMode::Solid(CollisionShape::Circle { radius }) = &obj.collision_mode {
+                    let r = if *radius > 0.0 { *radius } else { obj.size.0.min(obj.size.1) / 2.0 };
+                    Some(r * scale)
+                } else {
+                    None
+                };
+                prism::canvas::ShadowOccluder {
+                    position: (
+                        (obj.position.0 - cam_x) * scale + pad_x,
+                        (obj.position.1 - cam_y) * scale + pad_y,
+                    ),
+                    size: (obj.size.0 * scale, obj.size.1 * scale),
+                    rotation: obj.rotation.to_radians(),
+                    circle_radius,
+                }
             })
             .collect();
 
