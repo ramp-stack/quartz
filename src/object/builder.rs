@@ -49,6 +49,7 @@ pub struct GameObjectBuilder {
     pub(super) align_to_slope:       bool,
     pub(super) align_to_slope_speed: f32,
     pub(super) ignore_zoom:          bool,
+    pub(super) shadow_caster:        bool,
 }
 
 impl GameObjectBuilder {
@@ -204,6 +205,11 @@ impl GameObjectBuilder {
         self.align_to_slope_speed = speed.max(0.0); self
     }
     pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
+    /// Mark this object as a GPU shadow occluder — it will block light for all
+    /// point and spot lights (and directional lights when `casts_shadows` is enabled).
+    /// Independent of physics collision — use this for any visible geometry that
+    /// should logically block light (walls, obstacles, platforms, decorative objects).
+    pub fn casts_shadow(mut self) -> Self { self.shadow_caster = true; self }
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
         self.planet_radius    = Some(radius.max(0.0));
         self.gravity_strength = strength.max(0.0);
@@ -295,6 +301,7 @@ impl GameObjectBuilder {
             align_to_slope_speed: self.align_to_slope_speed,
             ignore_zoom:         self.ignore_zoom,
             unlit:               false,
+            shadow_caster:       self.shadow_caster,
         };
         if let Some(effect) = highlight { obj.set_highlight(effect); }
         obj

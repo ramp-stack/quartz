@@ -138,6 +138,7 @@ impl LightSource {
             radius: self.radius,
             intensity: self.intensity,
             kind,
+            casts_shadows: self.casts_shadows,
         }
     }
 }

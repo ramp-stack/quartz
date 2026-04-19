@@ -264,13 +264,14 @@ impl Component for Canvas {
 
         // Collect shadow occluders from visible platform objects.
         let occluders: Vec<prism::canvas::ShadowOccluder> = self.store.objects.iter()
-            .filter(|obj| obj.visible && obj.is_platform)
+            .filter(|obj| obj.visible && obj.shadow_caster)
             .map(|obj| prism::canvas::ShadowOccluder {
                 position: (
                     (obj.position.0 - cam_x) * scale + pad_x,
                     (obj.position.1 - cam_y) * scale + pad_y,
                 ),
                 size: (obj.size.0 * scale, obj.size.1 * scale),
+                rotation: obj.rotation.to_radians(),
             })
             .collect();
 
@@ -294,6 +295,8 @@ impl Component for Canvas {
                 color: l.color,
                 intensity: l.intensity,
                 radius: l.radius,
+                kind: l.kind,
+                casts_shadows: l.casts_shadows,
             }
         }).collect();
 

@@ -107,6 +107,15 @@ impl Canvas {
         }
     }
 
+    /// Set whether a game object casts shadows.
+    /// This is independent of physics collision type — call it on any visible
+    /// object that should block light (walls, pillars, decorative geometry, etc.).
+    pub fn set_shadow_caster(&mut self, name: &str, casts: bool) {
+        if let Some(obj) = self.get_game_object_mut(name) {
+            obj.shadow_caster = casts;
+        }
+    }
+
     // ── Attachments ──────────────────────────────────────────
 
     /// Attach a light to a game object so it follows automatically.

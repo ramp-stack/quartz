@@ -76,6 +76,9 @@ pub struct GameObject {
     pub align_to_slope:      bool,
     pub align_to_slope_speed: f32,
     pub unlit:               bool,
+    /// When `true`, this object is submitted as a GPU shadow occluder each frame.
+    /// Independent of physics collision type — a non-platform object can still cast shadows.
+    pub shadow_caster:       bool,
 }
 
 impl OnEvent for GameObject {}
@@ -279,6 +282,7 @@ impl GameObject {
             auto_align_min_depth: 0.3,
             align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
+            shadow_caster: false,
         }
     }
 
@@ -309,6 +313,7 @@ impl GameObject {
             align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
             unlit: false,
+            shadow_caster: false,
         }
     }
 
