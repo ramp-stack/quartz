@@ -14,6 +14,8 @@ pub(crate) mod file_watcher;
 pub mod expr;
 pub mod crystalline;
 
+pub use std::sync::Arc;
+
 pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
@@ -71,6 +73,8 @@ pub use value::{
 };
 
 pub mod prelude {
+    pub use std::sync::Arc;
+
     pub use prism::Context;
     pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
     pub use prism::event::{Key, NamedKey};

@@ -63,20 +63,16 @@ pub struct GameObject {
     pub planet_radius:       Option<f32>,
     pub gravity_target:      Option<String>,
     pub gravity_strength:    f32,
-    pub auto_align:          bool,
-    pub auto_align_speed:    f32,
-    pub auto_align_threshold: f32,
-    pub ignore_zoom:         bool,
     pub gravity_influence_mult: f32,
     pub gravity_falloff:     GravityFalloff,
     pub gravity_all_sources: bool,
     pub gravity_dominant_id: Option<String>,
     pub gravity_identity:    Option<String>,
-    pub auto_align:           bool,
-    pub auto_align_speed:     f32,
+    pub auto_align:          bool,
+    pub auto_align_speed:    f32,
     pub auto_align_threshold: f32,
     pub auto_align_min_depth: f32,
-    pub ignore_zoom:          bool,
+    pub ignore_zoom:         bool,
 }
 
 impl OnEvent for GameObject {}

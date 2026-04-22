@@ -166,8 +166,23 @@ Canvas::key(name: &str) -> bool
   "tab", "del", or any single-character string (e.g. "a").
 
 Canvas::is_key_held(key: &Key) -> bool
+  Returns true if the given Key is currently held. Use this to check modifier
+  state inside on_key_press callbacks:
+    let ctrl  = cv.is_key_held(&Key::Named(NamedKey::Control));
+    let shift = cv.is_key_held(&Key::Named(NamedKey::Shift));
+  Modifier keys (Control, Shift, Alt, Meta, CapsLock, NumLock, ScrollLock)
+  are tracked in held_keys but never fire GameEvents or press callbacks on
+  their own — they are only meaningful as modifiers to other keys.
+
 Canvas::on_key_press(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+  Registers a callback fired on every non-modifier key press.
+  Signature: |cv: &mut Canvas, key: &Key| { ... }
+  Read modifier state inside the callback via cv.is_key_held.
+  Modifier-only keypresses (Ctrl, Shift, etc.) do not trigger this callback.
+
 Canvas::on_key_release(cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static)
+  Registers a callback fired on every non-modifier key release.
+  Modifier-only releases do not trigger this callback.
 
 --------------------------------------------------------------------------------
 
@@ -286,6 +301,50 @@ Internal helpers in events.rs (pub(crate)):
   Canvas::screen_to_virtual(screen_pos: (f32,f32)) -> (f32,f32)
     Converts a raw screen-space position to virtual canvas coordinates,
     accounting for letterbox padding and the current scale factor.
+
+--------------------------------------------------------------------------------
+  CANVAS — Key Handling  (input.rs)
+--------------------------------------------------------------------------------
+
+Modifier keys are tracked in held_keys but are filtered out of the GameEvent
+and callback systems. They never fire on_key_press, on_key_release, or
+KeyPress/KeyRelease/KeyHold GameEvents on their own.
+
+Modifier keys: Control, Shift, Alt, Meta, CapsLock, NumLock, ScrollLock.
+
+Reading modifier state in a callback:
+  cv.on_key_press(move |cv, key| {
+      let ctrl  = cv.is_key_held(&Key::Named(NamedKey::Control));
+      let shift = cv.is_key_held(&Key::Named(NamedKey::Shift));
+      if ctrl {
+          // handle Ctrl+key combos
+          return;
+      }
+      // handle bare keys
+  });
+
+KeyHold GameEvents (process_held_key_events):
+  Only fire when no modifier keys are currently held.
+  GameEvents that specify a modifiers requirement fire only when a modifier
+  is held and the required modifiers match exactly.
+
+GameEvent key variants — modifier field:
+  KeyPress  / KeyRelease / KeyHold each carry
+    modifiers: Option<Modifiers>
+  None means "fire regardless of modifier state" (wildcard — backwards
+  compatible with all existing event registrations).
+  Some(m) means "only fire when the active modifiers equal m exactly".
+
+  Accessors on GameEvent:
+    .key()       -> Option<&Key>
+    .modifiers() -> Option<&Modifiers>   None = no requirement
+    .action()    -> &Action
+    .custom_name() -> Option<&str>
+
+Modifiers  (re-exported from prism::event via quartz)
+  Fields: shift: bool, ctrl: bool, alt: bool, meta: bool
+  Constructors: Modifiers::none() / shift() / ctrl() / alt() / meta()
+  .is_none() -> bool   true when all fields are false
 
 --------------------------------------------------------------------------------
   CANVAS — Virtual Scale & Text Helpers  (canvas/actions.rs)
@@ -829,8 +888,25 @@ GameEvent  (enum, Clone, Debug)
   Custom / MousePress / MouseRelease / MouseEnter / MouseLeave / MouseOver /
   MouseScroll / MouseMove
 
-  Accessors: .key(), .action(), .custom_name()
-  Predicates: .is_key_press(), .is_tick(), .is_mouse_scroll(), etc.
+  KeyPress, KeyRelease, and KeyHold each carry:
+    key:       prism::event::Key
+    action:    Action
+    target:    Target
+    modifiers: Option<Modifiers>
+      None    — fire regardless of modifier state (wildcard, default)
+      Some(m) — fire only when active modifiers exactly equal m
+
+  Accessors:
+    .key()         -> Option<&Key>
+    .modifiers()   -> Option<&Modifiers>   None = no requirement / not a key event
+    .action()      -> &Action
+    .custom_name() -> Option<&str>
+
+  Predicates:
+    .is_key_press() / .is_key_release() / .is_key_hold()
+    .is_tick() / .is_custom()
+    .is_mouse_press() / .is_mouse_release() / .is_mouse_enter()
+    .is_mouse_leave() / .is_mouse_over() / .is_mouse_scroll() / .is_mouse_move()
 
 --------------------------------------------------------------------------------
   MODULE: GameObject / GameObjectBuilder  (object/)
@@ -948,11 +1024,6 @@ GameObject  (struct, Clone, Debug)
     _size:               Option<(f32, f32)>   clip rectangle size; None = use object's laid-out size
     planet_radius:       Option<f32>
     gravity_target:      Option<String>
-    gravity_strength:    f32
-    auto_align:          bool
-    auto_align_speed:    f32
-    auto_align_threshold: f32
-    ignore_zoom:         bool
     gravity_strength:    f32              default 1.0
     gravity_influence_mult: f32           default 1.0 — range multiplier
     gravity_falloff:     GravityFalloff   default Linear

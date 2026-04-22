@@ -1,13 +1,14 @@
 use super::action::Action;
 use super::targeting::Target;
 use super::input_types::{MouseButton, ScrollAxis};
+use prism::event::Modifiers;
 
 pub enum GameEvent {
     Collision         { action: Action, target: Target },
     BoundaryCollision { action: Action, target: Target },
-    KeyPress          { key: prism::event::Key, action: Action, target: Target },
-    KeyRelease        { key: prism::event::Key, action: Action, target: Target },
-    KeyHold           { key: prism::event::Key, action: Action, target: Target },
+    KeyPress          { key: prism::event::Key, action: Action, target: Target, modifiers: Option<Modifiers> },
+    KeyRelease        { key: prism::event::Key, action: Action, target: Target, modifiers: Option<Modifiers> },
+    KeyHold           { key: prism::event::Key, action: Action, target: Target, modifiers: Option<Modifiers> },
     Tick              { action: Action, target: Target },
     Custom            { name: String, target: Target },
     MousePress        { action: Action, target: Target, button: Option<MouseButton> },
@@ -38,6 +39,15 @@ impl GameEvent {
             GameEvent::KeyPress   { key, .. }
             | GameEvent::KeyRelease { key, .. }
             | GameEvent::KeyHold    { key, .. } => Some(key),
+            _ => None,
+        }
+    }
+
+    pub fn modifiers(&self) -> Option<&Modifiers> {
+        match self {
+            GameEvent::KeyPress   { modifiers, .. }
+            | GameEvent::KeyRelease { modifiers, .. }
+            | GameEvent::KeyHold    { modifiers, .. } => modifiers.as_ref(),
             _ => None,
         }
     }
@@ -73,12 +83,12 @@ impl Clone for GameEvent {
                 GameEvent::Collision { action: action.clone(), target: target.clone() },
             GameEvent::BoundaryCollision { action, target } =>
                 GameEvent::BoundaryCollision { action: action.clone(), target: target.clone() },
-            GameEvent::KeyPress { key, action, target } =>
-                GameEvent::KeyPress { key: key.clone(), action: action.clone(), target: target.clone() },
-            GameEvent::KeyRelease { key, action, target } =>
-                GameEvent::KeyRelease { key: key.clone(), action: action.clone(), target: target.clone() },
-            GameEvent::KeyHold { key, action, target } =>
-                GameEvent::KeyHold { key: key.clone(), action: action.clone(), target: target.clone() },
+            GameEvent::KeyPress { key, action, target, modifiers } =>
+                GameEvent::KeyPress { key: key.clone(), action: action.clone(), target: target.clone(), modifiers: *modifiers },
+            GameEvent::KeyRelease { key, action, target, modifiers } =>
+                GameEvent::KeyRelease { key: key.clone(), action: action.clone(), target: target.clone(), modifiers: *modifiers },
+            GameEvent::KeyHold { key, action, target, modifiers } =>
+                GameEvent::KeyHold { key: key.clone(), action: action.clone(), target: target.clone(), modifiers: *modifiers },
             GameEvent::Tick { action, target } =>
                 GameEvent::Tick { action: action.clone(), target: target.clone() },
             GameEvent::Custom { name, target } =>
@@ -108,12 +118,12 @@ impl std::fmt::Debug for GameEvent {
                 f.debug_struct("Collision").field("action", action).field("target", target).finish(),
             GameEvent::BoundaryCollision { action, target } =>
                 f.debug_struct("BoundaryCollision").field("action", action).field("target", target).finish(),
-            GameEvent::KeyPress { key, action, target } =>
-                f.debug_struct("KeyPress").field("key", key).field("action", action).field("target", target).finish(),
-            GameEvent::KeyRelease { key, action, target } =>
-                f.debug_struct("KeyRelease").field("key", key).field("action", action).field("target", target).finish(),
-            GameEvent::KeyHold { key, action, target } =>
-                f.debug_struct("KeyHold").field("key", key).field("action", action).field("target", target).finish(),
+            GameEvent::KeyPress { key, action, target, modifiers } =>
+                f.debug_struct("KeyPress").field("key", key).field("action", action).field("target", target).field("modifiers", modifiers).finish(),
+            GameEvent::KeyRelease { key, action, target, modifiers } =>
+                f.debug_struct("KeyRelease").field("key", key).field("action", action).field("target", target).field("modifiers", modifiers).finish(),
+            GameEvent::KeyHold { key, action, target, modifiers } =>
+                f.debug_struct("KeyHold").field("key", key).field("action", action).field("target", target).field("modifiers", modifiers).finish(),
             GameEvent::Tick { action, target } =>
                 f.debug_struct("Tick").field("action", action).field("target", target).finish(),
             GameEvent::Custom { name, target } =>
