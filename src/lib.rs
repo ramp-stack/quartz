@@ -17,6 +17,8 @@ pub mod constraints;
 pub mod assets;
 pub mod timer;
 
+pub use std::sync::Arc;
+
 pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
@@ -81,6 +83,8 @@ pub use value::{
 };
 
 pub mod prelude {
+    pub use std::sync::Arc;
+
     pub use prism::Context;
     pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
     pub use prism::event::{Key, NamedKey};

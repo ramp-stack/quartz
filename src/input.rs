@@ -1,5 +1,5 @@
 use std::collections::{HashSet, HashMap};
-use prism::event::{Key, KeyboardEvent, KeyboardState};
+use prism::event::{Key, KeyboardEvent, KeyboardState, Modifiers, NamedKey};
 use crate::{Canvas, MouseButton, ScrollAxis, GameEvent};
 
 pub trait Callback: FnMut(&mut Canvas, &Key) + 'static {
@@ -138,6 +138,13 @@ impl CallbackStore {
     pub fn new() -> Self { Self::default() }
 }
 
+fn is_modifier_key(key: &Key) -> bool {
+    matches!(key, Key::Named(
+        NamedKey::Shift | NamedKey::Control | NamedKey::Alt | NamedKey::Meta |
+        NamedKey::CapsLock | NamedKey::NumLock | NamedKey::ScrollLock
+    ))
+}
+
 impl Canvas {
     pub fn on_key_press(&mut self, cb: impl FnMut(&mut Canvas, &Key) + Clone + 'static) {
         self.input.press_callbacks.push(Box::new(cb));
@@ -152,7 +159,7 @@ impl Canvas {
     }
 
     pub(crate) fn handle_keyboard_event(&mut self, evt: &KeyboardEvent) {
-        let KeyboardEvent { state, key, .. } = evt;
+        let KeyboardEvent { state, key, modifiers } = evt;
         match state {
             KeyboardState::Pressed if self.input.held_keys.insert(key.clone()) => {
                 println!("key {key:?}");
@@ -162,7 +169,9 @@ impl Canvas {
                 for cb in cbs.iter_mut() { cb(self, &key_clone); }
                 self.input.press_callbacks = cbs;
 
-                self.process_key_events(key, GameEvent::is_key_press);
+                if !is_modifier_key(key) {
+                    self.process_key_events(key, modifiers, GameEvent::is_key_press);
+                }
             }
             KeyboardState::Released => {
                 self.input.held_keys.remove(key);
@@ -172,19 +181,22 @@ impl Canvas {
                 for cb in cbs.iter_mut() { cb(self, &key_clone); }
                 self.input.release_callbacks = cbs;
 
-                self.process_key_events(key, GameEvent::is_key_release);
+                if !is_modifier_key(key) {
+                    self.process_key_events(key, modifiers, GameEvent::is_key_release);
+                }
             }
             _ => {}
         }
     }
 
-    pub(crate) fn process_key_events<F>(&mut self, key: &Key, predicate: F)
+    pub(crate) fn process_key_events<F>(&mut self, key: &Key, modifiers: &Modifiers, predicate: F)
     where
         F: Fn(&GameEvent) -> bool,
     {
         let actions: Vec<_> = self.store.events.iter()
             .flatten()
             .filter(|e| predicate(e) && e.key() == Some(key))
+            .filter(|e| e.modifiers().map_or(true, |m| m == modifiers))
             .map(|e| e.action().clone())
             .collect();
 
@@ -193,9 +205,19 @@ impl Canvas {
 
     pub(crate) fn process_held_key_events(&mut self) {
         let held = self.input.held_keys.clone();
+
+        let modifier_held = held.iter().any(is_modifier_key);
+
         let actions: Vec<_> = self.store.events.iter()
             .flatten()
             .filter(|e| GameEvent::is_key_hold(e) && e.key().map_or(false, |k| held.contains(k)))
+            .filter(|e| {
+                if modifier_held {
+                    e.modifiers().is_some()
+                } else {
+                    e.modifiers().is_none()
+                }
+            })
             .map(|e| e.action().clone())
             .collect();
 

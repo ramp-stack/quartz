@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 image = "0.25.9"
 prism  = { package = "prism2", path = "../prism"}
+ramp  = { package = "ramp2", path = "../ramp"}
 wgpu_canvas = {path="../wgpu_canvas", default-features = false}
 rand = "0.8"
 rodio = "0.21.1"
