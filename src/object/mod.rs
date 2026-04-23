@@ -68,11 +68,9 @@ pub struct GameObject {
     pub gravity_all_sources: bool,
     pub gravity_dominant_id: Option<String>,
     pub gravity_identity:    Option<String>,
-    pub auto_align:          bool,
-    pub auto_align_speed:    f32,
-    pub auto_align_threshold: f32,
     pub auto_align_min_depth: f32,
-    pub ignore_zoom:         bool,
+    pub align_to_slope:      bool,
+    pub align_to_slope_speed: f32,
 }
 
 impl OnEvent for GameObject {}
@@ -100,8 +98,19 @@ impl GameObject {
 
     /// Size reported to the parent layout — capped to the clip box when
     /// clipping is active so we don't push sibling widgets around.
+    /// Accounts for rotation so the layout-derived bounds encompass the
+    /// full rotated AABB, preventing the shader bounds-check from clipping
+    /// visible fragments of rotated objects.
     fn reported_size(&self) -> Size {
-        if self.ped { self._size.unwrap_or(self.size) } else { self.size }
+        let base = if self.ped { self._size.unwrap_or(self.size) } else { self.size };
+        if self.rotation == 0.0 {
+            return base;
+        }
+        let theta = self.rotation.to_radians();
+        let cos = theta.cos().abs();
+        let sin = theta.sin().abs();
+        let (w, h) = base;
+        (w * cos + h * sin, w * sin + h * cos)
     }
 
     /// Clip rect as `(x0, y0, x1, y1)` in absolute screen space.
@@ -251,6 +260,7 @@ impl GameObject {
             gravity_all_sources: false, gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
             auto_align_min_depth: 0.3,
+            align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
         }
     }
@@ -279,6 +289,7 @@ impl GameObject {
             gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
             auto_align_min_depth: 0.3,
+            align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
         }
     }

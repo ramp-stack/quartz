@@ -37,6 +37,7 @@ src/
     geometry.rs             boundary/anchor/slope/clip geometry helpers
 
   sprite.rs                 AnimatedSprite, image helpers
+  assets.rs                 ImageCache (general-purpose image cache)
   value.rs                  Value, Expr, MathOp, CompOp
   store.rs                  ObjectStore
   input.rs                  InputState, MouseState, CallbackStore
@@ -292,6 +293,8 @@ Each tick executes in this order:
   9.  planet landings                 (handle_planet_landings)
   10. auto-align                      (apply_auto_align)
   11. camera transform                (apply_camera_transform)
+      11a. auto flash overlay          (drive_flash_overlay — creates/updates
+                                        __quartz_flash_overlay when flash active)
   12. sorted-offset sync              (sync_sorted_offsets)
   13. boundary collision events       (trigger_boundary_collision_events)
 
@@ -485,6 +488,10 @@ Canvas::load_image_cached(path: &str) -> Image
 
 Canvas::load_image_sized_cached(path: &str, w: f32, h: f32) -> Image
   Load a sized image, caching by path+dimensions.
+
+Canvas::get_or_create_image(key: impl Into<String>, f: impl FnOnce() -> Image) -> Image
+  Get a cached image by key, or create it via the closure on a cache miss.
+  This is the primary entry point for procedural image caching.
 
 Canvas::clear_image_cache()
   Clear the entire image cache.
@@ -693,8 +700,6 @@ Condition  (enum, Debug, Clone)
   SpeedBelow(Target, f32)
   CrystallineEnabled
   EmitterActive(String)
-  OnPlanet(Target, Target)
-  InGravityField(Target, Target)
   OnPlanet(Target, Target)       object within planet surface radius
   InGravityField(Target, Target) object within 3x planet radius
   HasDominantPlanet(Target)      object has a closest-surface planet
@@ -791,35 +796,22 @@ Action  (enum, Clone, Debug)
   SetGravityInfluenceMult { target: Target, value: f32 }
   SetGravityFalloff  { target: Target, falloff: GravityFalloff }
   SetGravityAllSources { target: Target, enabled: bool }
+  CameraShake { intensity: f32, duration: f32 }
+  CameraFlash { color: Color, duration: f32 }
+  CameraFlashWith { color: Color, duration: f32,
+                    mode: FlashMode, ease: FlashEase,
+                    intensity: f32, freeze_frame: f32 }
+  CameraZoomPunch { amount: f32, duration: f32 }
+  SetAlignToSlope { target: Target, enabled: bool }
+  SetAlignToSlopeSpeed { target: Target, value: f32 }
 
-Action builder methods:
+Action builder methods (all return Action):
   Action::expr(s)
   Action::expr_checked(s) -> Result<Action, String>
-  Action::when / when_if / when_else
+  Action::when(condition, if_true, if_false_opt)
+  Action::when_if(condition, if_true)
+  Action::when_else(condition, if_true, if_false)
   Action::multi(actions: Vec<Action>)
-  Action::set_var / mod_var / custom
-  Action::show / hide / toggle / remove
-  Action::spawn / teleport
-  Action::apply_momentum / set_momentum / set_resistance / set_gravity
-  Action::transfer_momentum
-  Action::set_size / add_tag / remove_tag / set_text
-  Action::play_sound / play_sound_with_options
-  Action::set_animation
-  Action::set_rotation / add_rotation / apply_rotation
-  Action::set_slope / set_surface_normal / set_collision_mode
-  Action::set_glow / clear_glow / set_tint / clear_tint
-  Action::set_material / set_elasticity / set_friction / set_density
-  Action::apply_force / apply_impulse
-  Action::set_position / set_camera_relative
-  Action::wake_body / freeze_body / unfreeze_body
-  Action::set_collision_layer
-  Action::enable_crystalline / disable_crystalline
-  Action::spawn_emitter / remove_emitter / attach_emitter / attach_emitter_at / detach_emitter
-  Action::set_emitter_rate / lifetime / velocity / spread / size / color / gravity_scale /
-          collision / render_layer
-  Action::set_render_layer
-  Action::set_zoom / add_zoom
-  Action::set_gravity_strength / set_planet_radius / set_gravity_target
   Action::set_var(name, value)
   Action::mod_var(name, op: MathOp, operand)
   Action::custom(name)
@@ -878,6 +870,12 @@ Action builder methods:
   Action::set_gravity_influence_mult(target, value)
   Action::set_gravity_falloff(target, falloff)
   Action::set_gravity_all_sources(target, enabled)
+  Action::camera_shake(intensity, duration)
+  Action::camera_flash(color, duration)
+  Action::camera_flash_with(color, duration, mode, ease, intensity, freeze_frame)
+  Action::camera_zoom_punch(amount, duration)
+  Action::set_align_to_slope(target, enabled)
+  Action::set_align_to_slope_speed(target, value)
 
 --------------------------------------------------------------------------------
   MODULE: GameEvent  (types/event.rs)
@@ -962,11 +960,6 @@ Builder methods (all return Self):
   .planet(radius: f32)
   .gravity_target(tag: impl Into<String>)
   .gravity_strength(strength: f32)
-  .auto_align()
-  .auto_align_speed(speed: f32)
-  .auto_align_threshold(threshold: f32)
-  .ignore_zoom()
-  .gravity_well(radius: f32, strength: f32)
   .auto_align()                      enable planet surface alignment
   .auto_align_speed(speed: f32)      rotation lerp speed (default 3.0)
   .auto_align_threshold(threshold: f32)  degrees (default 45.0)
@@ -979,6 +972,8 @@ Builder methods (all return Self):
   .gravity_identity(id: impl Into<String>)  unique planet identity tag
   .celestial_physics()                 shorthand: all_gravity_sources + InverseSquare
   .unlimited_gravity_range()           shorthand: gravity_influence_mult(f32::MAX)
+  .align_to_slope()                    enable slope surface alignment (default false)
+  .align_to_slope_speed(speed: f32)    slope rotation lerp speed (default 8.0, clamped ≥ 0.0)
   .elasticity(val: f32) / .friction(val: f32) / .density(val: f32)
   .bouncy() / .slippery() / .heavy() / .light() / .rubber()
   .static_object()
@@ -1030,14 +1025,16 @@ GameObject  (struct, Clone, Debug)
     gravity_all_sources: bool             default false — respond to all planets
     gravity_dominant_id: Option<String>   closest planet (set by engine)
     gravity_identity:    Option<String>   unique planet identity tag
-    auto_align:          bool
+    auto_align:          bool             default false
     auto_align_speed:    f32              default 3.0
-    auto_align_threshold: f32            default 45.0 degrees
-    auto_align_min_depth: f32            default 0.3 (0.0–1.0, min gravity-field
-                                         depth fraction before alignment activates;
-                                         above the threshold, strength ramps to 1.0
-                                         at the planet surface)
+    auto_align_threshold: f32             default 45.0 degrees
+    auto_align_min_depth: f32             default 0.3 (0.0–1.0, min gravity-field
+                                          depth fraction before alignment activates;
+                                          above the threshold, strength ramps to 1.0
+                                          at the planet surface)
     ignore_zoom:         bool             default false — HUD-mode
+    align_to_slope:      bool             default false — slope surface alignment
+    align_to_slope_speed: f32             default 8.0 — rotation lerp speed (degrees/frame)
 
   Constructors (legacy — prefer build()):
     GameObject::new(ctx, id, drawable, size: f32, position, tags,
@@ -1169,6 +1166,7 @@ load_image_sized(path: &str, w: f32, h: f32) -> Image
 load_animation(path: &str, size: (f32,f32), fps: f32) -> AnimatedSprite
 flip_horizontal / flip_vertical / rotate_cw / rotate_ccw / rotate_180
 solid_circle(size: f32, color: Color) -> Image
+solid_ellipse(w: f32, h: f32, color: Color) -> Image
 planet_image(radius: u32, r: u8, g: u8, b: u8, size: f32) -> Image
 planet_grayscale(radius: u32, size: f32) -> Image
 with_tint(image: &Image, color: Color) -> Image
@@ -1253,6 +1251,84 @@ Camera::lerp_toward(wx: f32, wy: f32)   pub(crate)
   is controlled entirely by the anchor system (prevents follow from
   fighting the anchor point).
 
+Camera Effects API:
+
+Camera::shake(intensity: f32, duration: f32)
+  Start a camera shake. Intensity is in world-space pixels, duration in seconds.
+
+Camera::quick_shake()
+  Quick default shake — 6px intensity, 0.3s.
+
+Camera::flash(color: Color, duration: f32)
+  Screen flash. Color fades from full alpha to zero over `duration` seconds.
+  Uses defaults: FadeOut mode, Linear ease, full intensity, no freeze.
+  The engine automatically renders a fullscreen flash overlay — no manual
+  wiring needed.
+
+Camera::flash_with(
+    color: Color, duration: f32,
+    mode: FlashMode, ease: FlashEase,
+    intensity: f32, freeze_frame: f32,
+)
+  Screen flash with full control over the effect.
+  mode:         FadeOut (default) or Pulse (ramp up then down)
+  ease:         Linear, Smooth (sine curve), or Sharp (fast attack/slow decay)
+  intensity:    Peak alpha multiplier 0.0–1.0 (default 1.0)
+  freeze_frame: Seconds to hold at peak before decay begins (default 0.0)
+
+Camera::zoom_punch(amount: f32, duration: f32)
+  Zoom punch — a quick additive zoom burst that decays.
+  `amount` is how much extra zoom (e.g. 0.15 = 15% pop).
+
+CameraEffects API (read via cam.effects):
+
+CameraEffects::update(dt: f32)
+  Advances all active effects. Called automatically by the tick loop.
+
+CameraEffects::shake_offset() -> (f32, f32)
+  Current shake displacement. (0,0) when no shake active.
+
+CameraEffects::zoom_punch_amount() -> f32
+  Current additive zoom offset. 0.0 when no zoom punch active.
+
+CameraEffects::flash_alpha() -> f32
+  Current flash opacity 0.0–1.0. 0.0 when no flash active.
+
+CameraEffects::flash_color() -> Option<(Color, f32)>
+  Active flash color and alpha. None when no flash active.
+
+CameraEffects::flash_overlay_color() -> Option<Color>
+  Ready-to-render overlay color with alpha baked in. Returns None when
+  no flash is active or alpha has reached zero. Used internally by the
+  auto-flash overlay system; also available for custom rendering.
+
+FlashMode  (enum, Debug, Clone, Copy, PartialEq, Default = FadeOut)
+  FadeOut    Starts at full intensity, fades to zero. (default)
+  Pulse      Ramps up to peak brightness, then fades back down.
+
+FlashEase  (enum, Debug, Clone, Copy, PartialEq, Default = Linear)
+  Linear     Straight linear ramp.
+  Smooth     Smooth ease-in-out (sine curve).
+  Sharp      Fast attack, slow exponential decay — punchy impact feel.
+
+CameraEffects Structs:
+
+ShakeEffect  { intensity: f32, duration: f32, elapsed: f32, offset: (f32, f32) }
+FlashEffect  { color: Color, duration: f32, elapsed: f32,
+               intensity: f32, mode: FlashMode, ease: FlashEase,
+               freeze_frame: f32 }
+ZoomPunchEffect { amount: f32, duration: f32, elapsed: f32 }
+CameraEffects { shake: Option<ShakeEffect>, flash: Option<FlashEffect>,
+                zoom_punch: Option<ZoomPunchEffect> }
+
+Automatic Flash Overlay:
+  The engine automatically manages a fullscreen overlay object
+  (__quartz_flash_overlay) whenever a flash effect is active.
+  Calling cam.flash() or cam.flash_with() is all that's needed —
+  no manual overlay objects, tint_overlay calls, or render-order
+  management required. The overlay uses layer i32::MAX and
+  ignore_zoom, so it always covers the full screen.
+
 Public fields:
   position:        (f32, f32)   current camera offset applied to all objects
   world_size:      (f32, f32)
@@ -1264,6 +1340,7 @@ Public fields:
                    When set: position clamping to world bounds is disabled during
                    zoom adjustment, allowing negative camera positions (needed for
                    zoom-out with a floor/ground anchor). Follow Y is also disabled.
+  effects:         CameraEffects        camera effects state (shake, flash, zoom punch)
 
 --------------------------------------------------------------------------------
   MODULE: SoundOptions / SoundHandle  (sound.rs)
@@ -1307,6 +1384,83 @@ Methods: .tick() / .set(target) / .nudge(delta) / .set_bounds(min, max) /
 Entropy::new() / from_seed(u64) / from_time()
   .next() / .range(min, max) / .int(min, max) / .chance(p) /
   .pick(&[T]) / .position_in(x, y, w, h)
+
+--------------------------------------------------------------------------------
+  MODULE: Timer  (timer.rs)
+--------------------------------------------------------------------------------
+
+Timer  (struct, Debug, Clone)
+  A lightweight timer for cooldowns, delays, and periodic events.
+
+Timer::new(duration: f32) -> Timer
+  Create a one-shot timer that fires once after `duration` seconds.
+
+Timer::new_looped(duration: f32) -> Timer
+  Create a looping timer that resets every `duration` seconds.
+
+Timer::tick(dt: f32) -> bool
+  Advance by `dt` seconds. Returns true on the frame the timer fires
+  (once for one-shot, every cycle for looped). After a one-shot fires,
+  subsequent calls return false.
+
+Timer::progress() -> f32
+  Progress from 0.0 (start) to 1.0 (done/cycle complete).
+
+Timer::is_finished() -> bool
+  True once a one-shot timer has completed. Always false for looped timers.
+
+Timer::reset()
+  Reset the timer to the beginning.
+
+Timer::remaining() -> f32
+  Remaining time in seconds.
+
+Timer::duration() -> f32
+  The configured duration.
+
+Timer::elapsed() -> f32
+  Current elapsed time.
+================================================================================
+
+ImageCache  (struct, Clone, Debug, Default)
+  A general-purpose image cache keyed by string identifiers.
+  Games define their own key conventions (e.g. "circle_48_255_95_210").
+  Because Image uses Arc<RgbaImage>, clones are cheap (reference-count bump).
+
+  An ImageCache is embedded inside Canvas and exposed through convenience
+  methods. You can also create standalone instances for caching outside
+  of the canvas lifecycle.
+
+ImageCache::new() -> ImageCache
+  Create an empty cache.
+
+ImageCache::get_or_create(key: impl Into<String>, f: impl FnOnce() -> Image) -> Image
+  Return a cached image, or generate and cache it via the closure.
+  Primary entry point for procedural image caching.
+
+ImageCache::get(key: &str) -> Option<&Image>
+  Retrieve a previously cached image.
+
+ImageCache::insert(key: impl Into<String>, image: Image)
+  Insert an image into the cache, replacing any existing entry.
+
+ImageCache::remove(key: &str) -> Option<Image>
+  Remove a cached image by key.
+
+ImageCache::contains(key: &str) -> bool
+  Returns true if the cache contains an entry for the given key.
+
+ImageCache::clear()
+  Remove all cached images.
+
+ImageCache::len() -> usize
+  Number of cached images.
+
+ImageCache::is_empty() -> bool
+  Returns true if the cache is empty.
+
+ImageCache::retain(f: impl FnMut(&str, &mut Image) -> bool)
+  Retain only entries for which the predicate returns true.
 
 ================================================================================
   END OF CORE API REFERENCE

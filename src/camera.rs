@@ -1,4 +1,195 @@
 use crate::Target;
+use crate::entropy::Entropy;
+use prism::canvas::Color;
+
+// ── Flash Effect Configuration ────────────────────────────────────────────────
+
+/// How the flash brightness evolves over time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlashMode {
+    /// Starts at full intensity, fades to zero. (default, original behavior)
+    FadeOut,
+    /// Ramps up to peak brightness, then fades back down — looks like a camera flash.
+    Pulse,
+}
+
+impl Default for FlashMode {
+    fn default() -> Self { FlashMode::FadeOut }
+}
+
+/// Easing curve for the flash brightness.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlashEase {
+    /// Straight linear ramp.
+    Linear,
+    /// Smooth ease-in-out (sine curve).
+    Smooth,
+    /// Fast attack, slow exponential decay — punchy impact feel.
+    Sharp,
+}
+
+impl Default for FlashEase {
+    fn default() -> Self { FlashEase::Linear }
+}
+
+// ── Camera Effect Structs ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ShakeEffect {
+    pub intensity:  f32,
+    pub duration:   f32,
+    pub elapsed:    f32,
+    pub offset:     (f32, f32),
+}
+
+#[derive(Debug, Clone)]
+pub struct FlashEffect {
+    pub color:        Color,
+    pub duration:     f32,
+    pub elapsed:      f32,
+    /// Peak alpha multiplier (0.0–1.0). Default 1.0 = full brightness.
+    pub intensity:    f32,
+    /// How brightness evolves over time.
+    pub mode:         FlashMode,
+    /// Easing curve shape.
+    pub ease:         FlashEase,
+    /// Seconds to hold at peak brightness before decay begins. Default 0.0.
+    pub freeze_frame: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ZoomPunchEffect {
+    pub amount:   f32,
+    pub duration: f32,
+    pub elapsed:  f32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CameraEffects {
+    pub shake:      Option<ShakeEffect>,
+    pub flash:      Option<FlashEffect>,
+    pub zoom_punch: Option<ZoomPunchEffect>,
+    pub(crate) rng: Option<Entropy>,
+}
+
+impl CameraEffects {
+    pub fn update(&mut self, dt: f32) {
+        // ── Shake ──
+        if let Some(ref mut s) = self.shake {
+            s.elapsed += dt;
+            if s.elapsed >= s.duration {
+                self.shake = None;
+            } else {
+                let decay = 1.0 - (s.elapsed / s.duration);
+                let rng = self.rng.get_or_insert_with(Entropy::new);
+                s.offset = (
+                    rng.range(-s.intensity, s.intensity) * decay,
+                    rng.range(-s.intensity, s.intensity) * decay,
+                );
+            }
+        }
+
+        // ── Flash ──
+        if let Some(ref mut f) = self.flash {
+            f.elapsed += dt;
+            if f.elapsed >= f.duration + f.freeze_frame {
+                self.flash = None;
+            }
+        }
+
+        // ── Zoom punch ──
+        if let Some(ref mut z) = self.zoom_punch {
+            z.elapsed += dt;
+            if z.elapsed >= z.duration {
+                self.zoom_punch = None;
+            }
+        }
+    }
+
+    pub fn shake_offset(&self) -> (f32, f32) {
+        self.shake.as_ref().map_or((0.0, 0.0), |s| s.offset)
+    }
+
+    pub fn zoom_punch_amount(&self) -> f32 {
+        if let Some(ref z) = self.zoom_punch {
+            let t = (z.elapsed / z.duration).min(1.0);
+            // Quick pop in, smooth decay out.
+            let curve = 1.0 - (t * std::f32::consts::PI).sin().abs();
+            z.amount * (1.0 - curve)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn flash_alpha(&self) -> f32 {
+        self.flash.as_ref().map_or(0.0, |f| compute_flash_alpha(f))
+    }
+
+    pub fn flash_color(&self) -> Option<(Color, f32)> {
+        self.flash.as_ref().map(|f| {
+            (f.color, compute_flash_alpha(f))
+        })
+    }
+
+    /// Returns the ready-to-render overlay color with baked-in alpha.
+    /// Use this for automatic flash rendering.
+    pub fn flash_overlay_color(&self) -> Option<Color> {
+        self.flash.as_ref().map(|f| {
+            let alpha = compute_flash_alpha(f);
+            let a = (alpha * f.color.3 as f32).round().min(255.0).max(0.0) as u8;
+            if a == 0 { return None; }
+            Some(Color(f.color.0, f.color.1, f.color.2, a))
+        }).flatten()
+    }
+}
+
+// ── Flash alpha computation ───────────────────────────────────────────────────
+
+fn compute_flash_alpha(f: &FlashEffect) -> f32 {
+    let total = f.duration + f.freeze_frame;
+    if total <= 0.0 { return 0.0; }
+    let t_raw = (f.elapsed / total).min(1.0);
+
+    // freeze_frame: hold at peak for freeze_frame seconds, then decay
+    // t_eff is the decay progress (0.0 = peak, 1.0 = end) after the freeze
+    let freeze_frac = f.freeze_frame / total;
+    let t_eff = if t_raw <= freeze_frac {
+        0.0  // still in freeze window — full peak
+    } else {
+        ((t_raw - freeze_frac) / (1.0 - freeze_frac)).min(1.0)
+    };
+
+    let raw_alpha = match f.mode {
+        FlashMode::FadeOut => {
+            // Original behavior: starts at 1.0, decays to 0.0
+            1.0 - t_eff
+        }
+        FlashMode::Pulse => {
+            // Ramp up to peak in first 25% of decay, then fade back down
+            if t_eff < 0.25 {
+                t_eff / 0.25
+            } else {
+                1.0 - ((t_eff - 0.25) / 0.75)
+            }
+        }
+    };
+
+    let eased = match f.ease {
+        FlashEase::Linear => raw_alpha,
+        FlashEase::Smooth => {
+            // Smooth sine ease-in-out
+            0.5 - 0.5 * (raw_alpha * std::f32::consts::PI).cos()
+        }
+        FlashEase::Sharp => {
+            // Quadratic for fast attack, exponential decay feel
+            raw_alpha * raw_alpha
+        }
+    };
+
+    (eased * f.intensity).clamp(0.0, 1.0)
+}
+
+// ── Camera ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct Camera {
@@ -22,6 +213,9 @@ pub struct Camera {
     /// mouse world position, or a fixed geometric anchor like the floor).
     pub zoom_anchor:      Option<(f32, f32)>,
 
+    // ── Camera effects ────────────────────────────────────────────────────────
+    pub effects: CameraEffects,
+
     // ── Internal (unchanged) ──────────────────────────────────────────────────
     pub(crate) viewport_size:   (f32, f32),
     pub(crate) follow_target:   Option<Target>,
@@ -40,6 +234,7 @@ impl Camera {
             zoom_target:     1.0,
             zoom_lerp_speed: 0.12,
             zoom_anchor:     None,
+            effects:         CameraEffects::default(),
         }
     }
 
@@ -94,6 +289,73 @@ impl Camera {
         let v = value.max(0.01);
         self.zoom        = v;
         self.zoom_target = v;
+    }
+
+    // ── Camera effects API ────────────────────────────────────────────────────
+
+    /// Start a camera shake. Intensity is in world-space pixels, duration in seconds.
+    pub fn shake(&mut self, intensity: f32, duration: f32) {
+        self.effects.shake = Some(ShakeEffect {
+            intensity,
+            duration,
+            elapsed: 0.0,
+            offset: (0.0, 0.0),
+        });
+    }
+
+    /// Quick default shake — 6px intensity, 0.3s.
+    pub fn quick_shake(&mut self) {
+        self.shake(6.0, 0.3);
+    }
+
+    /// Screen flash. Color fades from full alpha to zero over `duration` seconds.
+    /// Uses default settings: FadeOut mode, Linear ease, full intensity, no freeze.
+    pub fn flash(&mut self, color: Color, duration: f32) {
+        self.effects.flash = Some(FlashEffect {
+            color,
+            duration: duration.max(0.01),
+            elapsed: 0.0,
+            intensity: 1.0,
+            mode: FlashMode::FadeOut,
+            ease: FlashEase::Linear,
+            freeze_frame: 0.0,
+        });
+    }
+
+    /// Screen flash with full control over the effect.
+    ///
+    /// `mode`:         FadeOut (default) or Pulse (ramp-up then fade)
+    /// `ease`:         Linear, Smooth (sine), or Sharp (fast attack)
+    /// `intensity`:    Peak alpha multiplier (0.0–1.0, default 1.0)
+    /// `freeze_frame`: Seconds to hold at peak before decay (default 0.0)
+    pub fn flash_with(
+        &mut self,
+        color:        Color,
+        duration:     f32,
+        mode:         FlashMode,
+        ease:         FlashEase,
+        intensity:    f32,
+        freeze_frame: f32,
+    ) {
+        self.effects.flash = Some(FlashEffect {
+            color,
+            duration: duration.max(0.01),
+            elapsed: 0.0,
+            intensity: intensity.clamp(0.0, 1.0),
+            mode,
+            ease,
+            freeze_frame: freeze_frame.max(0.0),
+        });
+    }
+
+    /// Zoom punch — a quick additive zoom burst that decays.
+    /// `amount` is how much extra zoom (e.g. 0.15 = 15% pop).
+    pub fn zoom_punch(&mut self, amount: f32, duration: f32) {
+        self.effects.zoom_punch = Some(ZoomPunchEffect {
+            amount,
+            duration: duration.max(0.01),
+            elapsed: 0.0,
+        });
     }
 
     // ── Coordinate helpers ────────────────────────────────────────────────────

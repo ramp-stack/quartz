@@ -33,6 +33,10 @@ pub enum Condition {
     HasDominantPlanet(Target),
     DominantPlanetIs(Target, Target),
     InAnyGravityField(Target),
+
+    // -- Grapple / constraint conditions ---
+    HasGrapple(Target),
+    NoGrapple(Target),
 }
 
 impl Condition {

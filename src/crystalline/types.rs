@@ -154,4 +154,8 @@ pub struct BodyUpdate {
     pub rotation: f32,
     pub rotation_momentum: f32,
     pub grounded: bool,
+    /// Surface normal of the platform that caused grounding (if any).
+    /// Used for slope alignment — the angle of this normal tells the
+    /// riding object how to orient itself flush with the surface.
+    pub grounded_surface_normal: Option<(f32, f32)>,
 }

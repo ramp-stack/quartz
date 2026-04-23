@@ -35,6 +35,7 @@ pub(super) struct DynamicContact {
 pub(super) fn solve_contact(
     bodies: &mut [PhysicsBody],
     grounded: &mut [bool],
+    grounded_normals: &mut [Option<(f32, f32)>],
     contact: &Contact,
     sleep_states: &[SleepState],
     correction_scale: f32,
@@ -73,9 +74,10 @@ pub(super) fn solve_contact(
     obj.position.0 += contact.dx * correction_scale;
     obj.position.1 += contact.dy * correction_scale;
 
-    // Grounded detection (every iteration — just a flag)
+    // Grounded detection (every iteration — just a flag + surface normal)
     if ny < -0.3 {
         grounded[contact.obj_idx] = true;
+        grounded_normals[contact.obj_idx] = Some((nx, ny));
     }
 
     // ── Velocity response (final iteration only to prevent compounding) ─

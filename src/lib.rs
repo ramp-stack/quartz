@@ -13,6 +13,9 @@ pub mod canvas;
 pub(crate) mod file_watcher;
 pub mod expr;
 pub mod crystalline;
+pub mod constraints;
+pub mod assets;
+pub mod timer;
 
 pub use std::sync::Arc;
 
@@ -38,7 +41,7 @@ pub use object::{GameObject, GameObjectBuilder};
 pub use sprite::{
     AnimatedSprite, RotationOptions, RotationDirection,
     load_image, load_image_sized, load_animation,
-    solid_circle, planet_image,
+    solid_circle, solid_ellipse, planet_image,
     planet_grayscale, with_tint,
     planet_atmosphere, glow_ring, tint_overlay,
     flip_horizontal, flip_vertical,
@@ -48,6 +51,8 @@ pub use sprite::{
 
 pub use scene::{Scene, SceneManager};
 pub use camera::Camera;
+pub use camera::{CameraEffects, ShakeEffect, FlashEffect, ZoomPunchEffect, FlashMode, FlashEase};
+pub use timer::Timer;
 pub use store::ObjectStore;
 pub use input::{
     InputState, Callback, MouseState, MouseCallback,
@@ -63,6 +68,11 @@ pub use crystalline::{
     ParticleSystem, ParticleState, ParticleStepResult,
     Emitter, EmitterBuilder, Particle, CollisionResponse,
 };
+pub use constraints::{
+    GrappleConstraint, GrappleCorrection, DistanceConstraint, SpringConstraint,
+    SwingBias, solve_distance_constraint,
+};
+pub use assets::ImageCache;
 pub use entropy::Entropy;
 pub use lerp::Lerp;
 pub use file_watcher::{Shared, SourceSettings, FromSource};
@@ -98,7 +108,7 @@ pub mod prelude {
     pub use crate::sprite::{
         AnimatedSprite, RotationOptions, RotationDirection,
         load_image, load_image_sized, load_animation,
-        solid_circle, planet_image,
+        solid_circle, solid_ellipse, planet_image,
         planet_grayscale, with_tint,
         planet_atmosphere, glow_ring, tint_overlay,
         flip_horizontal, flip_vertical,
@@ -108,6 +118,8 @@ pub mod prelude {
 
     pub use crate::scene::{Scene, SceneManager};
     pub use crate::camera::Camera;
+    pub use crate::camera::{CameraEffects, ShakeEffect, FlashEffect, ZoomPunchEffect, FlashMode, FlashEase};
+    pub use crate::timer::Timer;
     pub use crate::store::ObjectStore;
     pub use crate::input::{
         InputState, Callback, MouseState, MouseCallback,
@@ -124,6 +136,12 @@ pub mod prelude {
         Emitter, EmitterBuilder, Particle, CollisionResponse,
     };
 
+    pub use crate::constraints::{
+        GrappleConstraint, GrappleCorrection, DistanceConstraint, SpringConstraint,
+        SwingBias, solve_distance_constraint,
+    };
+
+    pub use crate::assets::ImageCache;
     pub use crate::entropy::Entropy;
     pub use crate::lerp::Lerp;
     pub use crate::file_watcher::{Shared, SourceSettings, FromSource};

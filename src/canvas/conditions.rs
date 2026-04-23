@@ -200,6 +200,14 @@ impl Canvas {
                     })
                 })
             }
+
+            // -- Grapple conditions --
+            Condition::HasGrapple(target) => {
+                self.store.get_names(target).iter().any(|name| self.has_grapple(name))
+            }
+            Condition::NoGrapple(target) => {
+                self.store.get_names(target).iter().all(|name| !self.has_grapple(name))
+            }
         }
     }
 
