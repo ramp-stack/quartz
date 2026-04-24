@@ -71,6 +71,10 @@ pub struct GameObject {
     pub auto_align_min_depth: f32,
     pub align_to_slope:      bool,
     pub align_to_slope_speed: f32,
+    pub auto_align:          bool,
+    pub auto_align_speed:    f32,
+    pub auto_align_threshold: f32,
+    pub ignore_zoom:         bool,
 }
 
 impl OnEvent for GameObject {}
