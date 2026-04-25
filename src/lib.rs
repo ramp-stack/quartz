@@ -30,8 +30,7 @@ pub use types::{
     GlowConfig, HighlightEffect,
     MouseButton, ScrollAxis,
     ConditionOps,
-    GravityFalloff,
-};
+    GravityFalloff,    ScreenPin,};
 
 pub use canvas::{Canvas, CanvasMode, CanvasLayout};
 pub use canvas::helpers::{orbit_speed, escape_speed};
@@ -97,8 +96,7 @@ pub mod prelude {
         GlowConfig, HighlightEffect,
         MouseButton, ScrollAxis,
         ConditionOps,
-        GravityFalloff,
-    };
+        GravityFalloff,        ScreenPin,    };
 
     pub use crate::canvas::{Canvas, CanvasMode, CanvasLayout};
     pub use crate::canvas::helpers::{orbit_speed, escape_speed};

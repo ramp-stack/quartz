@@ -22,7 +22,7 @@ src/
     location.rs             Location::resolve_position
 
   types/
-    mod.rs                  re-exports everything flat (no logic)
+    mod.rs                  re-exports everything flat (no logic) — includes ScreenPin
     targeting.rs            Target, Location, Anchor
     collision.rs            CollisionMode, CollisionShape, collision_layers
     effects.rs              GlowConfig, HighlightEffect
@@ -626,6 +626,38 @@ Location  (enum, Debug, Clone)
   Location::resolve_position(store: &ObjectStore) -> (f32, f32)   pub(crate)
 
 --------------------------------------------------------------------------------
+  MODULE: ScreenPin  (types/mod.rs)
+--------------------------------------------------------------------------------
+
+ScreenPin  (struct, Debug, Clone, Copy, PartialEq, Default)
+  Pins a screen-space object to a normalised anchor point on the viewport.
+  The engine recomputes the object's rendered offset every frame so the same
+  anchor point on the object's bounding box always aligns with the same
+  anchor point on the viewport.
+
+  Fields:
+    anchor: (f32, f32)   normalised viewport position.
+                         (0.0, 0.0) = top-left, (1.0, 1.0) = bottom-right,
+                         (0.5, 0.5) = center.
+    offset: (f32, f32)   pixel nudge in virtual screen coordinates applied
+                         after anchoring. Positive X = right, positive Y = down.
+
+  Engine computation (per frame):
+    px = canvas_w * anchor.0 + offset.0 - obj_w * anchor.0
+    py = canvas_h * anchor.1 + offset.1 - obj_h * anchor.1
+
+  Setting a ScreenPin automatically implies ignore_zoom = true.
+  Use the builder's .pin_*() helpers rather than constructing ScreenPin directly.
+
+  Common patterns:
+    .pin_top_left(30.0, 40.0)       30 px right, 40 px down from top-left corner
+    .pin_top_right(-30.0, 40.0)     30 px inside from top-right corner
+    .pin_top_center(30.0)           centered horizontally, 30 px from top
+    .pin_bottom_left(0.0, 0.0)      flush with bottom-left corner
+    .pin_center()                    centered on viewport
+    .fill_screen()                   top-left anchor at (0,0) — use with .size(VW, VH)
+
+--------------------------------------------------------------------------------
   MODULE: CollisionMode / CollisionShape  (types/collision.rs)
 --------------------------------------------------------------------------------
 
@@ -965,6 +997,22 @@ Builder methods (all return Self):
   .auto_align_threshold(threshold: f32)  degrees (default 45.0)
   .auto_align_min_depth(depth: f32)  0.0–1.0, min field depth before align activates (default 0.3)
   .ignore_zoom()                     exempt from camera zoom (for HUD)
+  .center_at(cx: f32, cy: f32)      position so centre lands at (cx, cy). Call .size() first.
+  .screen_space()                    alias for .ignore_zoom()
+  .pin(ax: f32, ay: f32)            pin to normalised viewport anchor. (0,0)=top-left, (1,1)=bottom-right.
+                                     implies screen_space().
+  .pin_offset(ox: f32, oy: f32)     pixel nudge added to the last pin anchor
+  .pin_top_left(ox: f32, oy: f32)   shorthand: pin(0,0).pin_offset(ox,oy)
+  .pin_top_right(ox: f32, oy: f32)  shorthand: pin(1,0).pin_offset(ox,oy)
+  .pin_top_center(oy: f32)          shorthand: pin(0.5,0).pin_offset(0,oy)
+  .pin_bottom_left(ox: f32, oy: f32)  shorthand: pin(0,1).pin_offset(ox,oy)
+  .pin_bottom_right(ox: f32, oy: f32) shorthand: pin(1,1).pin_offset(ox,oy)
+  .pin_bottom_center(oy: f32)       shorthand: pin(0.5,1).pin_offset(0,oy)
+  .pin_center()                      pin to viewport centre
+  .fill_screen()                     alias for pin(0,0) — place at top-left, no offset
+  .rotate_around_center()           set pivot = (0.5, 0.5) (this is the default)
+  .with_pivot(px: f32, py: f32)     custom normalised rotation pivot
+                                     (0.5,0.5) = centre, (0,0) = top-left corner
   .gravity_well(radius: f32, strength: f32)  planet_radius + non-solid
   .gravity_influence_mult(mult: f32)    gravity range multiplier (default 1.0)
   .gravity_falloff(falloff: GravityFalloff)  Linear or InverseSquare falloff
@@ -1033,6 +1081,8 @@ GameObject  (struct, Clone, Debug)
                                           above the threshold, strength ramps to 1.0
                                           at the planet surface)
     ignore_zoom:         bool             default false — HUD-mode
+    screen_pin:          Option<ScreenPin>  default None — viewport anchor (see ScreenPin module)
+    pivot:               (f32, f32)         default (0.5, 0.5) — normalised rotation pivot
     align_to_slope:      bool             default false — slope surface alignment
     align_to_slope_speed: f32             default 8.0 — rotation lerp speed (degrees/frame)
 
@@ -1055,6 +1105,11 @@ GameObject  (struct, Clone, Debug)
 
   Methods:
     .set_gravity(gravity: f32)
+    .set_center(cx: f32, cy: f32)
+      Move object so its centre is at (cx, cy).
+      Equivalent to position = (cx - size.0 * 0.5, cy - size.1 * 0.5).
+    .center() -> (f32, f32)
+      Returns the current centre: (position.0 + size.0 * 0.5, position.1 + size.1 * 0.5).
     .set_animation(sprite: AnimatedSprite)
     .set_image(image: Image)
     .set_drawable(drawable: Box<dyn Drawable>)

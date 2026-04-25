@@ -75,6 +75,15 @@ pub struct GameObject {
     pub auto_align_speed:    f32,
     pub auto_align_threshold: f32,
     pub ignore_zoom:         bool,
+    /// Screen-pin anchor. When `Some`, the engine repositions this object every
+    /// frame so its anchor point on the viewport aligns with the same anchor
+    /// point on its bounding box. Implies `ignore_zoom = true`.
+    pub screen_pin:          Option<crate::types::ScreenPin>,
+    /// Rotation pivot in normalised object space (0.0–1.0). Default `(0.5, 0.5)`
+    /// = centre. When pivot is `(0.5, 0.5)` the engine skips the bounding-box
+    /// expansion compensation, eliminating the frame-by-frame jitter on spinning
+    /// objects.
+    pub pivot:               (f32, f32),
 }
 
 impl OnEvent for GameObject {}
@@ -110,11 +119,39 @@ impl GameObject {
         if self.rotation == 0.0 {
             return base;
         }
+
+        // Use the same corner-rotation/min-max geometry as the renderer so
+        // parent layout bounds do not drift relative to the visual AABB.
+        // This avoids one-sided clipping that can look like pivot drift.
         let theta = self.rotation.to_radians();
-        let cos = theta.cos().abs();
-        let sin = theta.sin().abs();
-        let (w, h) = base;
-        (w * cos + h * sin, w * sin + h * cos)
+        let cos_t = theta.cos();
+        let sin_t = theta.sin();
+
+        let hw = base.0 * 0.5;
+        let hh = base.1 * 0.5;
+
+        let corners = [
+            (-hw, -hh),
+            ( hw, -hh),
+            (-hw,  hh),
+            ( hw,  hh),
+        ];
+
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+
+        for (dx, dy) in corners {
+            let rx = dx * cos_t - dy * sin_t;
+            let ry = dx * sin_t + dy * cos_t;
+            min_x = min_x.min(rx);
+            min_y = min_y.min(ry);
+            max_x = max_x.max(rx);
+            max_y = max_y.max(ry);
+        }
+
+        (max_x - min_x, max_y - min_y)
     }
 
     /// Clip rect as `(x0, y0, x1, y1)` in absolute screen space.
@@ -266,6 +303,8 @@ impl GameObject {
             auto_align_min_depth: 0.3,
             align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
+            screen_pin: None,
+            pivot: (0.5, 0.5),
         }
     }
 
@@ -295,6 +334,8 @@ impl GameObject {
             auto_align_min_depth: 0.3,
             align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
+            screen_pin: None,
+            pivot: (0.5, 0.5),
         }
     }
 
@@ -347,6 +388,16 @@ impl GameObject {
     pub fn clip(mut self)                                      -> Self { self.ped = true; self }
 
     pub fn set_gravity(&mut self, gravity: f32) { self.gravity = gravity; }
+
+    /// Move this object so its **centre** is at `(cx, cy)`.
+    pub fn set_center(&mut self, cx: f32, cy: f32) {
+        self.position = (cx - self.size.0 * 0.5, cy - self.size.1 * 0.5);
+    }
+
+    /// Returns the current centre of this object in world/screen space.
+    pub fn center(&self) -> (f32, f32) {
+        (self.position.0 + self.size.0 * 0.5, self.position.1 + self.size.1 * 0.5)
+    }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
         let (path, mtime) = capture_asset_path();

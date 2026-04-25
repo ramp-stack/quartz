@@ -107,19 +107,21 @@ impl Canvas {
             obj.scaled_size.set((obj.size.0 * obj_scale, obj.size.1 * obj_scale));
             obj.update_animation(delta_time);
 
-            if obj.animated_sprite.is_none() {
-                obj.update_image_shape();
-            }
-
             if obj.visible {
                 if !has_crystalline {
                     obj.apply_gravity();
                     obj.update_position();
                     obj.apply_resistance();
                     obj.apply_rotation_momentum();
+                }                
+                if obj.animated_sprite.is_none() {
+                    obj.update_image_shape();
                 }
                 self.layout.offsets[idx] = rotation_adjusted_offset(
-                    obj.position, obj.size, obj.rotation, obj.slope.is_some(),
+                    obj.position,
+                    obj.size,
+                    obj.rotation,
+                    obj.slope.is_some(),
                 );
             }
         }
@@ -157,9 +159,19 @@ impl Canvas {
         let (cam_x, cam_y) = (cam.position.0 + shake_offset.0, cam.position.1 + shake_offset.1);
         for (idx, obj) in self.store.objects.iter().enumerate() {
             let adj = rotation_adjusted_offset(
-                obj.position, obj.size, obj.rotation, obj.slope.is_some(),
+                obj.position,
+                obj.size,
+                obj.rotation,
+                obj.slope.is_some(),
             );
-            if obj.ignore_zoom {
+
+            if let Some(pin) = &obj.screen_pin {
+                let (vw, vh) = self.layout.canvas_size.get();
+                let px = vw * pin.anchor.0 + pin.offset.0 - obj.size.0 * pin.anchor.0;
+                let py = vh * pin.anchor.1 + pin.offset.1 - obj.size.1 * pin.anchor.1;
+                let safe = self.layout.safe_area_offset.get();
+                self.layout.offsets[idx] = (px + safe.0, py + safe.1);
+            } else if obj.ignore_zoom {
                 self.layout.offsets[idx] = adj;
             } else {
                 self.layout.offsets[idx] = (adj.0 - cam_x, adj.1 - cam_y);
@@ -352,7 +364,12 @@ impl Canvas {
             obj.position.1 += dy;
             if ny < -0.3 { obj.grounded = true; }
 
-            let adj = rotation_adjusted_offset(obj.position, obj.size, obj.rotation, obj.slope.is_some());
+            let adj = rotation_adjusted_offset(
+                obj.position,
+                obj.size,
+                obj.rotation,
+                obj.slope.is_some(),
+            );
             self.layout.offsets[obj_idx] = (adj.0 - cam_off.0, adj.1 - cam_off.1);
 
             if let Some(vx) = surf_vel {
@@ -622,7 +639,10 @@ impl Canvas {
             obj.position.1 = new_y;
 
             let adj = rotation_adjusted_offset(
-                obj.position, obj.size, obj.rotation, obj.slope.is_some(),
+                obj.position,
+                obj.size,
+                obj.rotation,
+                obj.slope.is_some(),
             );
             if let Some(offset) = self.layout.offsets.get_mut(obj_idx) {
                 *offset = adj;
@@ -745,15 +765,25 @@ fn shortest_angle_diff(from: f32, to: f32) -> f32 {
 // ── Free helpers ─────────────────────────────────────────────────────────────
 
 pub(crate) fn rotation_adjusted_offset(
-    position: (f32, f32), size: (f32, f32), rotation: f32, has_slope: bool,
+    position: (f32, f32),
+    size: (f32, f32),
+    rotation: f32,
+    has_slope: bool,
 ) -> (f32, f32) {
     if rotation == 0.0 || has_slope { return position; }
+
+    // Keep the rendered center locked by compensating with the rotated AABB
+    // extents used by rectangle projection.
     let theta = rotation.to_radians();
     let cos_t = theta.cos().abs();
     let sin_t = theta.sin().abs();
-    let new_w = size.0 * cos_t + size.1 * sin_t;
-    let new_h = size.0 * sin_t + size.1 * cos_t;
-    (position.0 - (new_w - size.0) * 0.5, position.1 - (new_h - size.1) * 0.5)
+    let aabb_w = size.0 * cos_t + size.1 * sin_t;
+    let aabb_h = size.0 * sin_t + size.1 * cos_t;
+
+    (
+        position.0 - (aabb_w - size.0) * 0.5,
+        position.1 - (aabb_h - size.1) * 0.5,
+    )
 }
 
 fn rotated_aabb(obj: &object::GameObject) -> (f32, f32, f32, f32) {

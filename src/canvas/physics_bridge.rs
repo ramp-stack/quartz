@@ -782,7 +782,18 @@ pub(crate) fn apply_physics_result(canvas: &mut Canvas, result: PhysicsStepResul
                 }
             }
 
-            (obj.size, obj.slope.is_some())
+                // Sync the drawable's embedded rotation to the post-crystalline
+                // obj.rotation so that rotation_adjusted_offset (which uses the
+                // same rotation) and the drawn shape always agree.  Without this,
+                // update_image_shape() was called in update_objects with the
+                // pre-crystalline rotation, causing a one-step lag between the
+                // offset compensation and the actual rendered shape rotation,
+                // which produced continuous visual-center drift on rotated objects.
+                if obj.animated_sprite.is_none() {
+                    obj.update_image_shape();
+                }
+
+                (obj.size, obj.slope.is_some())
         } else {
             continue;
         };
