@@ -35,6 +35,7 @@ pub enum Action {
     SetText       { target: Target, text: Text },
     Expr(String),
     SetRotation   { target: Target, value: f32 },
+    SetPivot      { target: Target, x: f32, y: f32 },
     SetSlope      { target: Target, left_offset: f32, right_offset: f32, auto_rotate: bool },
     AddRotation   { target: Target, value: f32 },
     ApplyRotation { target: Target, value: f32 },
@@ -174,6 +175,7 @@ impl Action {
     }
     pub fn apply_rotation(target: Target, value: f32) -> Self { Action::ApplyRotation { target, value } }
     pub fn set_rotation(target: Target, value: f32) -> Self   { Action::SetRotation { target, value } }
+    pub fn set_pivot(target: Target, x: f32, y: f32) -> Self  { Action::SetPivot { target, x, y } }
     pub fn add_rotation(target: Target, value: f32) -> Self   { Action::AddRotation { target, value } }
     pub fn show(target: Target)   -> Self { Action::Show { target } }
     pub fn hide(target: Target)   -> Self { Action::Hide { target } }

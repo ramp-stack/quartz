@@ -88,6 +88,8 @@ pub struct PhysicsBody {
     pub collision_layer: u32,
     pub planet_radius:  Option<f32>,
     pub gravity_target: Option<String>,
+    /// Normalised rotation pivot in object space (0.0–1.0). Default (0.5, 0.5).
+    pub pivot: (f32, f32),
 }
 
 // ── Physics Config ───────────────────────────────────────────

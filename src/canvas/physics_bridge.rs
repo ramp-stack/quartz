@@ -745,6 +745,7 @@ pub(crate) fn build_physics_bodies(canvas: &Canvas) -> Vec<PhysicsBody> {
             collision_layer: obj.collision_layer,
             planet_radius: obj.planet_radius,
             gravity_target: obj.gravity_target.clone(),
+            pivot: obj.pivot,
         }
     }).collect()
 }
@@ -752,7 +753,7 @@ pub(crate) fn build_physics_bodies(canvas: &Canvas) -> Vec<PhysicsBody> {
 /// Write physics step results back into game objects.
 pub(crate) fn apply_physics_result(canvas: &mut Canvas, result: PhysicsStepResult) {
     for update in result.body_updates {
-        let (size, has_slope) = if let Some(obj) = canvas.store.objects.get_mut(update.id) {
+        let (size, has_slope, pivot) = if let Some(obj) = canvas.store.objects.get_mut(update.id) {
             obj.position = update.position;
             obj.momentum = update.momentum;
             obj.rotation = update.rotation;
@@ -767,8 +768,9 @@ pub(crate) fn apply_physics_result(canvas: &mut Canvas, result: PhysicsStepResul
                 if let Some((nx, ny)) = update.grounded_surface_normal {
                     // Target angle: slope normal points "up" from the
                     // surface, so the object's visual "up" should match.
-                    // atan2(-nx, -ny) gives degrees where flat = 0°.
-                    let target = (-nx).atan2(-ny).to_degrees();
+                    // atan2(nx, -ny) gives degrees where flat = 0° and
+                    // matches slope_auto_rotation(right-left, width) sign.
+                    let target = nx.atan2(-ny).to_degrees();
                     let diff = shortest_angle(obj.rotation, target);
                     let speed = obj.align_to_slope_speed;
                     let step = diff.signum() * speed.min(diff.abs());
@@ -793,13 +795,13 @@ pub(crate) fn apply_physics_result(canvas: &mut Canvas, result: PhysicsStepResul
                     obj.update_image_shape();
                 }
 
-                (obj.size, obj.slope.is_some())
+                (obj.size, obj.slope.is_some(), obj.pivot)
         } else {
             continue;
         };
         if let Some(offset) = canvas.layout.offsets.get_mut(update.id) {
             *offset = super::physics::rotation_adjusted_offset(
-                update.position, size, update.rotation, has_slope,
+                update.position, size, update.rotation, has_slope, pivot,
             );
         }
     }

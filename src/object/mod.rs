@@ -123,33 +123,15 @@ impl GameObject {
         // Use the same corner-rotation/min-max geometry as the renderer so
         // parent layout bounds do not drift relative to the visual AABB.
         // This avoids one-sided clipping that can look like pivot drift.
-        let theta = self.rotation.to_radians();
-        let cos_t = theta.cos();
-        let sin_t = theta.sin();
 
-        let hw = base.0 * 0.5;
-        let hh = base.1 * 0.5;
-
-        let corners = [
-            (-hw, -hh),
-            ( hw, -hh),
-            (-hw,  hh),
-            ( hw,  hh),
-        ];
-
-        let mut min_x = f32::INFINITY;
-        let mut min_y = f32::INFINITY;
-        let mut max_x = f32::NEG_INFINITY;
-        let mut max_y = f32::NEG_INFINITY;
-
-        for (dx, dy) in corners {
-            let rx = dx * cos_t - dy * sin_t;
-            let ry = dx * sin_t + dy * cos_t;
-            min_x = min_x.min(rx);
-            min_y = min_y.min(ry);
-            max_x = max_x.max(rx);
-            max_y = max_y.max(ry);
-        }
+        // Rotate all four corners around the pivot and take the AABB.
+        // Delegates to corners_world() — the single source of truth for this sweep.
+        // With pivot (0.5, 0.5) this produces the same result as before.
+        let corners = self.corners_world();
+        let min_x = corners.iter().map(|c| c.0).fold(f32::MAX, |a, b| a.min(b));
+        let max_x = corners.iter().map(|c| c.0).fold(f32::MIN, |a, b| a.max(b));
+        let min_y = corners.iter().map(|c| c.1).fold(f32::MAX, |a, b| a.min(b));
+        let max_y = corners.iter().map(|c| c.1).fold(f32::MIN, |a, b| a.max(b));
 
         (max_x - min_x, max_y - min_y)
     }

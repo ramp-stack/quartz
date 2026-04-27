@@ -288,6 +288,11 @@ impl Canvas {
             Action::SetRotation { target, value } => {
                 self.store.apply_to_targets(&target, |obj| obj.rotation = value);
             }
+            Action::SetPivot { target, x, y } => {
+                let x = x.clamp(0.0, 1.0);
+                let y = y.clamp(0.0, 1.0);
+                self.store.apply_to_targets(&target, |obj| obj.pivot = (x, y));
+            }
             Action::SetSlope { target, left_offset, right_offset, auto_rotate } => {
                 let indices = self.store.get_indices(&target);
                 for idx in indices {

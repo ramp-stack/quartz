@@ -274,7 +274,7 @@ impl Canvas {
         let vpos = self.screen_to_virtual(screen_pos);
 
         match evt.state {
-            PrismMouseState::Pressed => {
+            PrismMouseState::Pressed(_) => {
                 self.mouse.position = Some(vpos);
                 let btn = MouseButton::Left;
 
@@ -284,7 +284,7 @@ impl Canvas {
 
                 self.process_mouse_press_events(vpos, btn);
             }
-            PrismMouseState::Released => {
+            PrismMouseState::Released(_) => {
                 self.mouse.position = Some(vpos);
                 let btn = MouseButton::Left;
 

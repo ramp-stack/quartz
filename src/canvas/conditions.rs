@@ -72,6 +72,21 @@ impl Canvas {
                     })
                 })
             }
+            Condition::IsRotating(target) => {
+                self.store.get_indices(target).iter().any(|&idx| {
+                    self.store.objects.get(idx).map_or(false, |obj| {
+                        obj.rotation_momentum.abs() > 0.01
+                    })
+                })
+            }
+            Condition::IsStill(target) => {
+                self.store.get_indices(target).iter().all(|&idx| {
+                    self.store.objects.get(idx).map_or(true, |obj| {
+                        let speed_sq = obj.momentum.0 * obj.momentum.0 + obj.momentum.1 * obj.momentum.1;
+                        speed_sq <= 0.01 && obj.rotation_momentum.abs() <= 0.01
+                    })
+                })
+            }
             Condition::SpeedAbove(target, threshold) => {
                 let t2 = threshold * threshold;
                 self.store.get_indices(target).iter().any(|&idx| {

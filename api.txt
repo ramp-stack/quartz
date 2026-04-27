@@ -778,6 +778,7 @@ Action  (enum, Clone, Debug)
   SetText          { target: Target, text: Text }
   Expr(String)
   SetRotation      { target: Target, value: f32 }
+  SetPivot         { target: Target, x: f32, y: f32 }
   SetSlope         { target: Target, left_offset: f32, right_offset: f32,
                      auto_rotate: bool }
   AddRotation      { target: Target, value: f32 }
@@ -859,6 +860,7 @@ Action builder methods (all return Action):
   Action::play_sound(path) / play_sound_with_options(path, options)
   Action::set_animation(target, animation_bytes, fps)
   Action::set_rotation(target, value)
+  Action::set_pivot(target, x, y)
   Action::add_rotation(target, value)
   Action::apply_rotation(target, value)
   Action::set_slope(target, left, right, auto_rotate)

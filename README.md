@@ -50,7 +50,7 @@ It is designed for projects where you own the full screen and want direct contro
 
 **Audio** — `play_sound` with volume, pitch, pan, looping, and fade controls.
 
-**Alignment & Screen Pinning** — `center_at(cx, cy)` on the builder positions objects by centre rather than top-left. `screen_space()` / `pin_*(anchor, offset)` builder methods pin HUD objects to normalised viewport anchors (`pin_top_left`, `pin_top_center`, `pin_bottom_right`, etc.) — the engine repositions them automatically every frame, so manual per-tick `obj.position = ...` reassignments are gone. `fill_screen()` places fullscreen overlays at (0, 0) with a single call. `rotate_around_center()` / `with_pivot(px, py)` let you change the rotation pivot without jitter.
+**Alignment & Screen Pinning** — `center_at(cx, cy)` on the builder positions objects by centre rather than top-left. `screen_space()` / `pin_*(anchor, offset)` builder methods pin HUD objects to normalised viewport anchors (`pin_top_left`, `pin_top_center`, `pin_bottom_right`, etc.) — the engine repositions them automatically every frame, so manual per-tick `obj.position = ...` reassignments are gone. `fill_screen()` places fullscreen overlays at (0, 0) with a single call. `rotate_around_center()` / `with_pivot(px, py)` let you change the rotation pivot without jitter. For slope-facing behavior, use `align_to_slope()` / `align_to_slope_speed(...)` on builders and `Action::set_align_to_slope(...)` / `Action::set_align_to_slope_speed(...)` at runtime.
 
 **Shared State** — `Shared<T>`, a lightweight `Rc<RefCell<T>>` wrapper with a `.changed()` flag for coordinating state across closures.
 
