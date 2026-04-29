@@ -233,7 +233,7 @@ impl GameObjectBuilder {
 
     pub fn build(self, _ctx: &mut Context) -> GameObject { self.finish() }
 
-    pub fn finish(self) -> GameObject {
+        pub fn finish(self) -> GameObject {
         let size      = self.size;
         let highlight = self.highlight;
         let mut obj   = GameObject {
@@ -248,6 +248,7 @@ impl GameObjectBuilder {
             resistance:          self.resistance,
             gravity:             self.gravity,
             scaled_size:         Cell::new(size),
+            render_scale:        Cell::new(1.0),
             is_platform:         self.is_platform,
             visible:             true,
             layer:               self.layer,

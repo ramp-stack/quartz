@@ -105,6 +105,7 @@ impl Canvas {
             obj.grounded = false;
             let obj_scale = if obj.ignore_zoom { base_scale } else { scale };
             obj.scaled_size.set((obj.size.0 * obj_scale, obj.size.1 * obj_scale));
+            obj.render_scale.set(obj_scale);
             obj.update_animation(delta_time);
 
             if obj.animated_sprite.is_none() {

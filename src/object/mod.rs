@@ -35,6 +35,7 @@ pub struct GameObject {
     pub resistance:      (f32, f32),
     pub gravity:         f32,
     pub scaled_size:     Cell<(f32, f32)>,
+    pub render_scale:    Cell<f32>,
     pub is_platform:     bool,
     pub visible:         bool,
     pub layer:           i32,
@@ -77,8 +78,6 @@ pub struct GameObject {
 
 impl OnEvent for GameObject {}
 
-// ── private helpers ───────────────────────────────────────────────────────────
-
 impl GameObject {
     fn active_children(&self) -> Vec<&dyn Drawable> {
         if !self.visible { return vec![]; }
@@ -98,37 +97,22 @@ impl GameObject {
         v
     }
 
-    /// Size reported to the parent layout — capped to the clip box when
-    /// clipping is active so we don't push sibling widgets around.
     fn reported_size(&self) -> Size {
         if self.ped { self._size.unwrap_or(self.size) } else { self.size }
     }
 
-    /// Clip rect as `(x0, y0, x1, y1)` in absolute screen space.
     fn clip_rect(&self, poffset: Offset) -> Rect {
-        let (cx, cy) = self._origin.unwrap_or(poffset);
-        let (cw, ch) = self._size.unwrap_or(self.size);
-        (cx, cy, cx + cw, cy + ch)
-    }
-
-    /// Clip rect expressed relative to a given draw offset, as wgpu_canvas
-    /// expects bounds in the coordinate space of the item being drawn
-    /// (i.e. relative to the CanvasArea.offset, not absolute screen coords).
-    fn clip_rect_relative(&self, poffset: Offset, draw_offset: Offset) -> Rect {
-        let abs = self.clip_rect(poffset);
-        (
-            abs.0 - draw_offset.0,
-            abs.1 - draw_offset.1,
-            abs.2 - draw_offset.0,
-            abs.3 - draw_offset.1,
-        )
+        let s = self.render_scale.get();
+        let (cx, cy) = self._origin
+            .map(|(x, y)| (x * s, y * s))
+            .unwrap_or(poffset);
+        let (cw, ch) = self._size
+            .map(|(w, h)| (w * s, h * s))
+            .unwrap_or(self.size);
+        // return as (x, y, w, h) to match renderer expectation
+        (cx, cy, cw, ch)
     }
 }
-
-// ── Drawable ──────────────────────────────────────────────────────────────────
-//
-// Fully manual — avoids the blanket `impl<C: Component + OnEvent> Drawable for C`
-// conflict so we can control request_size / build / draw precisely.
 
 impl Drawable for GameObject {
     fn request_size(&self) -> RequestTree {
@@ -136,31 +120,12 @@ impl Drawable for GameObject {
             .into_iter()
             .map(Drawable::request_size)
             .collect();
-        // Tell the parent our visible footprint only (clip size when active).
         RequestTree(SizeRequest::fixed(self.reported_size()), child_requests)
     }
 
     fn build(&self, size: Size, request: RequestTree) -> SizedTree {
-        let own_size = request.0.get(size);
-
-        // Children ALWAYS get the full declared size (self.size), never the
-        // clip size. This is the critical fix for scrolling:
-        //
-        // A text object declared 4000px wide needs 4000px to lay out into.
-        // If we passed clip_size (e.g. box_w=580) here instead, branch.0
-        // (the child's resolved size) would be 580px. Then in draw(), the
-        // line:
-        //   bound.2.min(child_offset.0 + child_size.0)
-        // computes:
-        //   clip_right.min(scrolled_left + 580)
-        // When scrolled_left < box_x, that min shrinks the right edge of
-        // the scissor rect, causing text to be cut off before box_x+box_w.
-        //
-        // By giving children self.size, child_size.0 = 4000, so:
-        //   clip_right.min(scrolled_left + 4000) = clip_right  (always)
-        // and we skip the inner re-intersection entirely anyway (see draw).
+        let own_size   = request.0.get(size);
         let child_size = self.size;
-
         SizedTree(
             own_size,
             self.active_children()
@@ -182,18 +147,15 @@ impl Drawable for GameObject {
     ) -> Vec<(CanvasArea, CanvasItem)> {
         if !self.visible { return vec![]; }
 
-        // Tighten the incoming bound to the clip rect once.
-        // After this, `bound` is the final scissor rect for all children.
         let bound = if self.ped {
             let cr = self.clip_rect(poffset);
-            let b  = (
-                bound.0.max(cr.0),
-                bound.1.max(cr.1),
-                bound.2.min(cr.2),
-                bound.3.min(cr.3),
-            );
-            if b.2 <= b.0 || b.3 <= b.1 { return vec![]; }
-            b
+            // both bound and cr are (x, y, w, h)
+            let x0 = bound.0.max(cr.0);
+            let y0 = bound.1.max(cr.1);
+            let x1 = (bound.0 + bound.2).min(cr.0 + cr.2);
+            let y1 = (bound.1 + bound.3).min(cr.1 + cr.3);
+            if x1 <= x0 || y1 <= y0 { return vec![]; }
+            (x0, y0, x1 - x0, y1 - y0)
         } else {
             bound
         };
@@ -202,13 +164,6 @@ impl Drawable for GameObject {
             .zip(self.active_children())
             .flat_map(|((offset, branch), child)| {
                 let child_offset = (poffset.0 + offset.0, poffset.1 + offset.1);
-
-                // Pass `bound` directly to the child — do NOT re-intersect
-                // with child_offset + child_size. Re-intersecting shrinks
-                // the scissor rect when the child has scrolled left (its
-                // origin is outside the clip window, so adding even a small
-                // child_size can land short of clip_rect.x1). The clip rect
-                // is already fully encoded in `bound` above.
                 child.draw(branch, child_offset, bound)
             })
             .collect()
@@ -218,7 +173,6 @@ impl Drawable for GameObject {
         let areas: Vec<Area> = sized.1.iter()
             .map(|(o, branch)| Area { offset: *o, size: branch.0 })
             .collect();
-
         let events = OnEvent::on_event(self, ctx, sized, event);
         for ev in events {
             for (slot, (child, (_, branch))) in
@@ -231,8 +185,6 @@ impl Drawable for GameObject {
         }
     }
 }
-
-// ── public API ────────────────────────────────────────────────────────────────
 
 impl GameObject {
     pub fn build(id: impl Into<String>) -> GameObjectBuilder {
@@ -265,7 +217,9 @@ impl GameObject {
             id: String::new(), tags: vec![], drawable: None, animated_sprite: None,
             size, position: (0.0, 0.0), momentum: (0.0, 0.0),
             resistance: (1.0, 1.0), gravity: 0.0,
-            scaled_size: Cell::new(size), is_platform: false, visible: true, layer: 0,
+            scaled_size: Cell::new(size),
+            render_scale: Cell::new(1.0),
+            is_platform: false, visible: true, layer: 0,
             rotation: 0.0, slope: None, one_way: false, surface_velocity: None,
             rotation_momentum: 0.0, rotation_resistance: 0.85,
             surface_normal: (0.0, -1.0), collision_mode: CollisionMode::Surface,
