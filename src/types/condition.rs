@@ -22,6 +22,8 @@ pub enum Condition {
     // -- Crystalline physics conditions ---
     IsSleeping(Target),
     IsMoving(Target),
+    IsRotating(Target),
+    IsStill(Target),
     SpeedAbove(Target, f32),
     SpeedBelow(Target, f32),
     CrystallineEnabled,
@@ -33,6 +35,10 @@ pub enum Condition {
     HasDominantPlanet(Target),
     DominantPlanetIs(Target, Target),
     InAnyGravityField(Target),
+
+    // -- Grapple / constraint conditions ---
+    HasGrapple(Target),
+    NoGrapple(Target),
 }
 
 impl Condition {

@@ -88,6 +88,8 @@ pub struct PhysicsBody {
     pub collision_layer: u32,
     pub planet_radius:  Option<f32>,
     pub gravity_target: Option<String>,
+    /// Normalised rotation pivot in object space (0.0–1.0). Default (0.5, 0.5).
+    pub pivot: (f32, f32),
 }
 
 // ── Physics Config ───────────────────────────────────────────
@@ -154,4 +156,8 @@ pub struct BodyUpdate {
     pub rotation: f32,
     pub rotation_momentum: f32,
     pub grounded: bool,
+    /// Surface normal of the platform that caused grounding (if any).
+    /// Used for slope alignment — the angle of this normal tells the
+    /// riding object how to orient itself flush with the surface.
+    pub grounded_surface_normal: Option<(f32, f32)>,
 }

@@ -258,6 +258,124 @@ impl Canvas {
         }
     }
 
+    // -- Grapple constraint system -----------------------------------------
+
+    /// Attach a grapple constraint to a named game object.
+    /// If the object already has a grapple, it is replaced.
+    pub fn attach_grapple(&mut self, name: &str, mut grapple: crate::constraints::GrappleConstraint) {
+        // If anchor_object is set, resolve its current position as initial anchor
+        if let Some(anchor_name) = &grapple.anchor_object {
+            if let Some(anchor_obj) = self.get_game_object(anchor_name) {
+                grapple.anchor = (
+                    anchor_obj.position.0 + anchor_obj.size.0 * 0.5,
+                    anchor_obj.position.1 + anchor_obj.size.1 * 0.5,
+                );
+            }
+        }
+        self.grapple_constraints.insert(name.to_string(), grapple);
+        // Wake the body so the grapple takes effect immediately
+        self.wake_body(name);
+    }
+
+    /// Release (remove) the grapple from a named game object.
+    pub fn release_grapple(&mut self, name: &str) {
+        self.grapple_constraints.remove(name);
+    }
+
+    /// Check if an object has an active grapple attached.
+    pub fn has_grapple(&self, name: &str) -> bool {
+        self.grapple_constraints.get(name).map_or(false, |g| g.active)
+    }
+
+    /// Get a reference to an object's grapple constraint (if any).
+    pub fn get_grapple(&self, name: &str) -> Option<&crate::constraints::GrappleConstraint> {
+        self.grapple_constraints.get(name)
+    }
+
+    /// Mutable access to an object's grapple constraint (advanced).
+    pub fn get_grapple_mut(&mut self, name: &str) -> Option<&mut crate::constraints::GrappleConstraint> {
+        self.grapple_constraints.get_mut(name)
+    }
+
+    /// Enforce grapple constraints by applying position/velocity corrections
+    /// directly to the store. Called AFTER the physics solver step so
+    /// corrections override the solver's output (XPBD-style).
+    pub(crate) fn enforce_grapple_constraints(&mut self) {
+        if self.grapple_constraints.is_empty() {
+            return;
+        }
+
+        // First, update anchors for grapples attached to objects
+        let anchor_updates: Vec<(String, (f32, f32))> = self.grapple_constraints.iter()
+            .filter_map(|(name, grapple)| {
+                let anchor_name = grapple.anchor_object.as_ref()?;
+                let anchor_obj = self.store.name_to_index.get(anchor_name.as_str())
+                    .and_then(|&idx| self.store.objects.get(idx))?;
+                Some((name.clone(), (
+                    anchor_obj.position.0 + anchor_obj.size.0 * 0.5,
+                    anchor_obj.position.1 + anchor_obj.size.1 * 0.5,
+                )))
+            })
+            .collect();
+
+        for (name, anchor_pos) in anchor_updates {
+            if let Some(g) = self.grapple_constraints.get_mut(&name) {
+                g.anchor = anchor_pos;
+            }
+        }
+
+        // Solve each grapple and collect corrections
+        struct GrappleCorr {
+            idx: usize,
+            position: Option<(f32, f32)>,
+            velocity: Option<(f32, f32)>,
+        }
+        let mut corrections: Vec<GrappleCorr> = Vec::new();
+
+        let names: Vec<String> = self.grapple_constraints.keys().cloned().collect();
+        for name in &names {
+            let idx = match self.store.name_to_index.get(name.as_str()) {
+                Some(&i) => i,
+                None => continue,
+            };
+            let obj = match self.store.objects.get(idx) {
+                Some(o) => o,
+                None => continue,
+            };
+            let obj_center = (
+                obj.position.0 + obj.size.0 * 0.5,
+                obj.position.1 + obj.size.1 * 0.5,
+            );
+            let obj_vel = obj.momentum;
+            let half_w = obj.size.0 * 0.5;
+            let half_h = obj.size.1 * 0.5;
+
+            if let Some(grapple) = self.grapple_constraints.get_mut(name.as_str()) {
+                let correction = grapple.solve(obj_center, obj_vel);
+                if correction.applied() {
+                    // Convert center position back to top-left corner
+                    corrections.push(GrappleCorr {
+                        idx,
+                        position: correction.position.map(|(cx, cy)| (cx - half_w, cy - half_h)),
+                        velocity: correction.velocity,
+                    });
+                }
+            }
+        }
+
+        // Apply corrections directly to store objects
+        for corr in corrections {
+            if let Some(obj) = self.store.objects.get_mut(corr.idx) {
+                if let Some(pos) = corr.position {
+                    obj.position = pos;
+                }
+                if let Some(vel) = corr.velocity {
+                    obj.momentum = vel;
+                }
+            }
+        }
+    }
+
     // -- Planet gravity injection (crystalline path) ------------------------
 
     pub(crate) fn inject_planet_gravity(&mut self) {
@@ -467,6 +585,12 @@ impl Canvas {
             apply_physics_result(self, result);
         }
 
+        // Enforce grapple constraints AFTER the solver step.
+        // Position-level correction: projects objects back onto the rope
+        // arc and strips outward radial velocity. Must happen after the
+        // solver integrates forces/velocity so corrections override.
+        self.enforce_grapple_constraints();
+
         // Step particle system.
         if let Some(ps) = &mut self.particle_system {
             let ps_result = ps.step(delta_time, None);
@@ -621,6 +745,7 @@ pub(crate) fn build_physics_bodies(canvas: &Canvas) -> Vec<PhysicsBody> {
             collision_layer: obj.collision_layer,
             planet_radius: obj.planet_radius,
             gravity_target: obj.gravity_target.clone(),
+            pivot: obj.pivot,
         }
     }).collect()
 }
@@ -628,22 +753,64 @@ pub(crate) fn build_physics_bodies(canvas: &Canvas) -> Vec<PhysicsBody> {
 /// Write physics step results back into game objects.
 pub(crate) fn apply_physics_result(canvas: &mut Canvas, result: PhysicsStepResult) {
     for update in result.body_updates {
-        let (size, has_slope) = if let Some(obj) = canvas.store.objects.get_mut(update.id) {
+        let (size, has_slope, pivot) = if let Some(obj) = canvas.store.objects.get_mut(update.id) {
             obj.position = update.position;
             obj.momentum = update.momentum;
             obj.rotation = update.rotation;
             obj.rotation_momentum = update.rotation_momentum;
             obj.grounded = update.grounded;
-            (obj.size, obj.slope.is_some())
+
+            // ── Slope alignment ──────────────────────────────────
+            // When an object has align_to_slope enabled and is grounded on
+            // a surface, smoothly rotate it to match the slope's angle.
+            // Skip objects that use planet auto_align (planet takes priority).
+            if obj.align_to_slope && !obj.auto_align {
+                if let Some((nx, ny)) = update.grounded_surface_normal {
+                    // Target angle: slope normal points "up" from the
+                    // surface, so the object's visual "up" should match.
+                    // atan2(nx, -ny) gives degrees where flat = 0° and
+                    // matches slope_auto_rotation(right-left, width) sign.
+                    let target = nx.atan2(-ny).to_degrees();
+                    let diff = shortest_angle(obj.rotation, target);
+                    let speed = obj.align_to_slope_speed;
+                    let step = diff.signum() * speed.min(diff.abs());
+                    obj.rotation += step;
+                } else if !obj.grounded {
+                    // Airborne — ease back toward 0°.
+                    let diff = shortest_angle(obj.rotation, 0.0);
+                    let speed = obj.align_to_slope_speed * 0.5;
+                    let step = diff.signum() * speed.min(diff.abs());
+                    obj.rotation += step;
+                }
+            }
+
+                // Sync the drawable's embedded rotation to the post-crystalline
+                // obj.rotation so that rotation_adjusted_offset (which uses the
+                // same rotation) and the drawn shape always agree.  Without this,
+                // update_image_shape() was called in update_objects with the
+                // pre-crystalline rotation, causing a one-step lag between the
+                // offset compensation and the actual rendered shape rotation,
+                // which produced continuous visual-center drift on rotated objects.
+                if obj.animated_sprite.is_none() {
+                    obj.update_image_shape();
+                }
+
+                (obj.size, obj.slope.is_some(), obj.pivot)
         } else {
             continue;
         };
         if let Some(offset) = canvas.layout.offsets.get_mut(update.id) {
             *offset = super::physics::rotation_adjusted_offset(
-                update.position, size, update.rotation, has_slope,
+                update.position, size, update.rotation, has_slope, pivot,
             );
         }
     }
+}
+
+/// Shortest signed angular difference (degrees), result in [-180, 180].
+fn shortest_angle(from: f32, to: f32) -> f32 {
+    let d = (to - from).rem_euclid(360.0);
+    if d > 180.0 { d - 360.0 } else { d }
 }
 
 /// Update emitter origins that are attached to game objects.

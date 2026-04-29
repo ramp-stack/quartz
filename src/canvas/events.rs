@@ -21,7 +21,11 @@ impl OnEvent for Canvas {
         }
 
         if let Some(_tick) = event.downcast_ref::<TickEvent>() {
-            if self.paused { return vec![event]; }
+            if self.paused {
+                self.apply_camera_transform();
+                self.sync_sorted_offsets();
+                return vec![event];
+            }
             const DELTA_TIME: f32 = 0.016;
 
             let mut tick_cbs = std::mem::take(&mut self.callbacks.tick);

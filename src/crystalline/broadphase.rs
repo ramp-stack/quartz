@@ -15,7 +15,17 @@ impl Aabb {
     /// `check_collision` does: expanded bounding box for rotated platforms,
     /// slope-aware AABB for sloped platforms.
     pub fn from_body(body: &PhysicsBody) -> Self {
-        if body.is_platform && body.slope.is_some() {
+        if body.is_platform && body.slope.is_some() && body.rotation != 0.0 {
+            // Sloped platform also has rotation (e.g. slope_auto_rotation).
+            // Use pivot-aware rotated AABB so broadphase detects the true extent.
+            let (x, y, w, h) = rotated_aabb(body);
+            Self {
+                min_x: x,
+                min_y: y,
+                max_x: x + w,
+                max_y: y + h,
+            }
+        } else if body.is_platform && body.slope.is_some() {
             let (x, y, w, h) = slope_aabb(body);
             Self {
                 min_x: x,
@@ -317,19 +327,37 @@ impl AabbPairFinder {
 
 // ── AABB helpers (ported from Quartz) ────────────────────────
 
-/// Expanded AABB for a rotated platform.
+/// Expanded AABB for a rotated platform (pivot-aware).
 fn rotated_aabb(body: &PhysicsBody) -> (f32, f32, f32, f32) {
     if body.rotation == 0.0 {
         return (body.position.0, body.position.1, body.size.0, body.size.1);
     }
+    // Corner sweep around pivot — matches Quartz's corners_world() logic.
+    let (px, py) = body.pivot;
+    let pw_x = body.position.0 + body.size.0 * px;
+    let pw_y = body.position.1 + body.size.1 * py;
     let theta = body.rotation.to_radians();
-    let cos_t = theta.cos().abs();
-    let sin_t = theta.sin().abs();
-    let w = body.size.0 * cos_t + body.size.1 * sin_t;
-    let h = body.size.0 * sin_t + body.size.1 * cos_t;
-    let cx = body.position.0 + body.size.0 * 0.5;
-    let cy = body.position.1 + body.size.1 * 0.5;
-    (cx - w * 0.5, cy - h * 0.5, w, h)
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+    let local = [
+        (-body.size.0 * px,          -body.size.1 * py),
+        ( body.size.0 * (1.0 - px),  -body.size.1 * py),
+        (-body.size.0 * px,           body.size.1 * (1.0 - py)),
+        ( body.size.0 * (1.0 - px),   body.size.1 * (1.0 - py)),
+    ];
+    let mut min_x = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut min_y = f32::MAX;
+    let mut max_y = f32::MIN;
+    for (lx, ly) in local {
+        let wx = pw_x + lx * cos_t - ly * sin_t;
+        let wy = pw_y + lx * sin_t + ly * cos_t;
+        min_x = min_x.min(wx);
+        max_x = max_x.max(wx);
+        min_y = min_y.min(wy);
+        max_y = max_y.max(wy);
+    }
+    (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
 /// Slope-aware AABB for a sloped platform.

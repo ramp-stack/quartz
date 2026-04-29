@@ -69,11 +69,22 @@ pub struct GameObject {
     pub gravity_all_sources: bool,
     pub gravity_dominant_id: Option<String>,
     pub gravity_identity:    Option<String>,
+    pub auto_align_min_depth: f32,
+    pub align_to_slope:      bool,
+    pub align_to_slope_speed: f32,
     pub auto_align:          bool,
     pub auto_align_speed:    f32,
     pub auto_align_threshold: f32,
-    pub auto_align_min_depth: f32,
     pub ignore_zoom:         bool,
+    /// Screen-pin anchor. When `Some`, the engine repositions this object every
+    /// frame so its anchor point on the viewport aligns with the same anchor
+    /// point on its bounding box. Implies `ignore_zoom = true`.
+    pub screen_pin:          Option<crate::types::ScreenPin>,
+    /// Rotation pivot in normalised object space (0.0–1.0). Default `(0.5, 0.5)`
+    /// = centre. When pivot is `(0.5, 0.5)` the engine skips the bounding-box
+    /// expansion compensation, eliminating the frame-by-frame jitter on spinning
+    /// objects.
+    pub pivot:               (f32, f32),
 }
 
 impl OnEvent for GameObject {}
@@ -97,8 +108,31 @@ impl GameObject {
         v
     }
 
+    /// Size reported to the parent layout — capped to the clip box when
+    /// clipping is active so we don't push sibling widgets around.
+    /// Accounts for rotation so the layout-derived bounds encompass the
+    /// full rotated AABB, preventing the shader bounds-check from clipping
+    /// visible fragments of rotated objects.
     fn reported_size(&self) -> Size {
-        if self.ped { self._size.unwrap_or(self.size) } else { self.size }
+        let base = if self.ped { self._size.unwrap_or(self.size) } else { self.size };
+        if self.rotation == 0.0 {
+            return base;
+        }
+
+        // Use the same corner-rotation/min-max geometry as the renderer so
+        // parent layout bounds do not drift relative to the visual AABB.
+        // This avoids one-sided clipping that can look like pivot drift.
+
+        // Rotate all four corners around the pivot and take the AABB.
+        // Delegates to corners_world() — the single source of truth for this sweep.
+        // With pivot (0.5, 0.5) this produces the same result as before.
+        let corners = self.corners_world();
+        let min_x = corners.iter().map(|c| c.0).fold(f32::MAX, |a, b| a.min(b));
+        let max_x = corners.iter().map(|c| c.0).fold(f32::MIN, |a, b| a.max(b));
+        let min_y = corners.iter().map(|c| c.1).fold(f32::MAX, |a, b| a.min(b));
+        let max_y = corners.iter().map(|c| c.1).fold(f32::MIN, |a, b| a.max(b));
+
+        (max_x - min_x, max_y - min_y)
     }
 
     fn clip_rect(&self, poffset: Offset) -> Rect {
@@ -203,7 +237,10 @@ impl GameObject {
             gravity_all_sources: false, gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
             auto_align_min_depth: 0.3,
+            align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
+            screen_pin: None,
+            pivot: (0.5, 0.5),
         }
     }
 
@@ -233,7 +270,10 @@ impl GameObject {
             gravity_identity: None,
             auto_align: false, auto_align_speed: 3.0, auto_align_threshold: 45.0,
             auto_align_min_depth: 0.3,
+            align_to_slope: false, align_to_slope_speed: 8.0,
             ignore_zoom: false,
+            screen_pin: None,
+            pivot: (0.5, 0.5),
         }
     }
 
@@ -286,6 +326,16 @@ impl GameObject {
     pub fn clip(mut self)                                      -> Self { self.ped = true; self }
 
     pub fn set_gravity(&mut self, gravity: f32) { self.gravity = gravity; }
+
+    /// Move this object so its **centre** is at `(cx, cy)`.
+    pub fn set_center(&mut self, cx: f32, cy: f32) {
+        self.position = (cx - self.size.0 * 0.5, cy - self.size.1 * 0.5);
+    }
+
+    /// Returns the current centre of this object in world/screen space.
+    pub fn center(&self) -> (f32, f32) {
+        (self.position.0 + self.size.0 * 0.5, self.position.1 + self.size.1 * 0.5)
+    }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
         let (path, mtime) = capture_asset_path();
