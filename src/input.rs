@@ -163,7 +163,6 @@ impl Canvas {
         match state {
             KeyboardState::Pressed if self.input.held_keys.insert(key.clone()) => {
                 println!("key {key:?}");
-
                 let key_clone = key.clone();
                 let mut cbs = std::mem::take(&mut self.input.press_callbacks);
                 for cb in cbs.iter_mut() { cb(self, &key_clone); }
@@ -175,7 +174,6 @@ impl Canvas {
             }
             KeyboardState::Released => {
                 self.input.held_keys.remove(key);
-
                 let key_clone = key.clone();
                 let mut cbs = std::mem::take(&mut self.input.release_callbacks);
                 for cb in cbs.iter_mut() { cb(self, &key_clone); }
@@ -199,28 +197,20 @@ impl Canvas {
             .filter(|e| e.modifiers().map_or(true, |m| m == modifiers))
             .map(|e| e.action().clone())
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
     pub(crate) fn process_held_key_events(&mut self) {
         let held = self.input.held_keys.clone();
-
         let modifier_held = held.iter().any(is_modifier_key);
-
         let actions: Vec<_> = self.store.events.iter()
             .flatten()
             .filter(|e| GameEvent::is_key_hold(e) && e.key().map_or(false, |k| held.contains(k)))
             .filter(|e| {
-                if modifier_held {
-                    e.modifiers().is_some()
-                } else {
-                    e.modifiers().is_none()
-                }
+                if modifier_held { e.modifiers().is_some() } else { e.modifiers().is_none() }
             })
             .map(|e| e.action().clone())
             .collect();
-
         actions.into_iter().for_each(|a| self.run(a));
     }
 
@@ -277,30 +267,24 @@ impl Canvas {
             PrismMouseState::Pressed(_) => {
                 self.mouse.position = Some(vpos);
                 let btn = MouseButton::Left;
-
                 let mut cbs = std::mem::take(&mut self.mouse.press_callbacks);
                 for cb in cbs.iter_mut() { cb(self, btn, vpos); }
                 self.mouse.press_callbacks = cbs;
-
                 self.process_mouse_press_events(vpos, btn);
             }
             PrismMouseState::Released(_) => {
                 self.mouse.position = Some(vpos);
                 let btn = MouseButton::Left;
-
                 let mut cbs = std::mem::take(&mut self.mouse.release_callbacks);
                 for cb in cbs.iter_mut() { cb(self, btn, vpos); }
                 self.mouse.release_callbacks = cbs;
-
                 self.process_mouse_release_events(vpos, btn);
             }
             PrismMouseState::Moved => {
                 self.mouse.position = Some(vpos);
-
                 let mut cbs = std::mem::take(&mut self.mouse.move_callbacks);
                 for cb in cbs.iter_mut() { cb(self, vpos); }
                 self.mouse.move_callbacks = cbs;
-
                 self.process_mouse_move_events(vpos);
                 self.update_hover_state(vpos);
             }
@@ -308,7 +292,6 @@ impl Canvas {
                 let mut cbs = std::mem::take(&mut self.mouse.scroll_callbacks);
                 for cb in cbs.iter_mut() { cb(self, (dx, dy)); }
                 self.mouse.scroll_callbacks = cbs;
-
                 self.process_mouse_scroll_events(vpos, dx, dy);
             }
         }
@@ -331,17 +314,13 @@ impl Canvas {
             .difference(&self.mouse.hovered_indices)
             .copied()
             .collect();
-        for idx in entered {
-            self.trigger_mouse_enter_events(idx);
-        }
+        for idx in entered { self.trigger_mouse_enter_events(idx); }
 
         let left: Vec<usize> = self.mouse.hovered_indices
             .difference(&now_hovered)
             .copied()
             .collect();
-        for idx in left {
-            self.trigger_mouse_leave_events(idx);
-        }
+        for idx in left { self.trigger_mouse_leave_events(idx); }
 
         self.mouse.hovered_indices = now_hovered;
     }
@@ -354,12 +333,8 @@ impl Canvas {
                         if let GameEvent::MousePress { action, button, .. } = e {
                             if button.map_or(true, |b| b == pressed_btn) {
                                 Some(action.clone())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                            } else { None }
+                        } else { None }
                     })
                     .collect::<Vec<_>>()
             })
@@ -375,12 +350,8 @@ impl Canvas {
                         if let GameEvent::MouseRelease { action, button, .. } = e {
                             if button.map_or(true, |b| b == released_btn) {
                                 Some(action.clone())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                            } else { None }
+                        } else { None }
                     })
                     .collect::<Vec<_>>()
             })
@@ -421,16 +392,14 @@ impl Canvas {
                     .filter_map(|e| {
                         if let GameEvent::MouseScroll { action, axis, .. } = e {
                             let matches = match axis {
-                                None                     => true,
-                                Some(ScrollAxis::Up)     => dy < 0.0,
-                                Some(ScrollAxis::Down)   => dy > 0.0,
-                                Some(ScrollAxis::Left)   => dx < 0.0,
-                                Some(ScrollAxis::Right)  => dx > 0.0,
+                                None                    => true,
+                                Some(ScrollAxis::Up)    => dy < 0.0,
+                                Some(ScrollAxis::Down)  => dy > 0.0,
+                                Some(ScrollAxis::Left)  => dx < 0.0,
+                                Some(ScrollAxis::Right) => dx > 0.0,
                             };
                             if matches { Some(action.clone()) } else { None }
-                        } else {
-                            None
-                        }
+                        } else { None }
                     })
                     .collect::<Vec<_>>()
             })

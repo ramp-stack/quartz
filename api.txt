@@ -1567,6 +1567,159 @@ GravityFalloff  (enum, Debug, Clone, Copy, PartialEq, Default=Linear)
   At planet surface (dist == radius) both produce identical magnitude.
   InverseSquare enables realistic orbital mechanics.
 
+
+--------------------------------------------------------------------------------
+  MODULE: ScrollConfig / ScrollState / ScrollView  (scroll.rs)
+--------------------------------------------------------------------------------
+
+ScrollConfig  (struct, Debug, Clone, Copy, PartialEq)
+  Fields:
+    accel:    f32   Velocity added per scroll-event unit.    Default 5.5.
+    friction: f32   Velocity multiplier per tick (decay).   Default 0.10.
+    max_vel:  f32   Maximum scroll velocity (absolute).     Default 90.0.
+
+  Presets:
+    ScrollConfig::default()   Balanced — matches the editor component's values.
+    ScrollConfig::editor()    Alias for default().
+    ScrollConfig::fast()      Higher top speed, snappier feel (accel 9.0 / max 150.0).
+    ScrollConfig::slow()      Lower top speed, heavier feel (accel 3.0 / max 45.0).
+
+ScrollState  (struct, Debug, Clone)
+  Pure physics state for a scrollable region. No Canvas dependency.
+  Both axes are independent and share a single ScrollConfig.
+
+  Constructor:
+    ScrollState::new(cfg: ScrollConfig) -> ScrollState
+
+  Sizing — call once or whenever content / viewport changes:
+    .set_content_size(w: f32, h: f32)    Total scrollable content dimensions.
+    .set_viewport_size(w: f32, h: f32)   Visible window dimensions.
+
+  Impulse drivers — call from event handlers:
+    .push_x(units: f32)   Instantaneous horizontal impulse (e.g. raw dx from scroll event).
+    .push_y(units: f32)   Instantaneous vertical impulse   (e.g. raw dy from scroll event).
+
+  Sustained intent — call from key-hold / drag-edge logic:
+    .set_intent_x(vel: f32)   Applied every tick until cleared. Pass 0.0 to stop.
+    .set_intent_y(vel: f32)   Applied every tick until cleared. Pass 0.0 to stop.
+    .clear_intent()           Clear intent on both axes.
+
+  Direct velocity access — for drag-edge or arrow-key overrides:
+    .set_vel_x(v: f32) / .set_vel_y(v: f32)
+    .vel_x() -> f32    / .vel_y() -> f32
+    .max_vel() -> f32   The configured max velocity; use as intent magnitude.
+
+  Tick — call once per frame in on_update:
+    .tick()
+
+  Read position:
+    .offset_x() -> f32
+    .offset_y() -> f32
+
+  Jump / reset:
+    .jump_to(x: f32, y: f32)   Instantly set offset, clamps to valid range, zeroes velocity.
+    .reset()                    Jump to (0, 0).
+
+ScrollView  (struct, Clone)
+  Owns a Shared<ScrollState> and registers on_mouse_scroll automatically
+  via mount. All other input (keyboard intent, drag-edge) is driven by the
+  caller through state().
+
+  Constructor:
+    ScrollView::new(x: f32, y: f32, w: f32, h: f32, cfg: ScrollConfig) -> ScrollView
+
+  Bounds:
+    .set_bounds(x: f32, y: f32, w: f32, h: f32)
+      Update screen-space bounds and viewport size together.
+
+  Content:
+    .set_content_size(content_w: f32, content_h: f32)
+
+  State access:
+    .state() -> &Shared<ScrollState>
+      Direct access for driving intent / impulses from key or drag-edge handlers.
+
+  Tick + read — call in on_update:
+    .tick()
+    .offset_x() -> f32
+    .offset_y() -> f32
+
+  Mount — call once during component setup:
+    .mount(cv: &mut Canvas)
+      Registers on_mouse_scroll. After this, wheel events inside the region
+      are handled automatically. No other input is registered.
+
+Canvas convenience:
+  Canvas::register_scroll_view(view: &ScrollView)
+    Equivalent to view.mount(self).
+
+DOUBLE-BORROW NOTE
+  ScrollState is wrapped in Shared<T>. Follow the same double-borrow rule
+  as all other Shared values — dereference to a plain value before calling
+  get_mut on the same Shared:
+    let max = { *scroll.state().get() }.max_vel();   // Ref dropped
+    scroll.state().get_mut().set_intent_y(-max);     // safe
+
+USAGE EXAMPLE
+
+  // ── setup ──────────────────────────────────────────────────────────────────
+  let scroll = ScrollView::new(x, y, w, h, ScrollConfig::editor());
+  scroll.set_content_size(max_line_width, total_lines * line_height);
+  scroll.mount(cv);   // registers on_mouse_scroll, nothing else
+
+  // ── on_update ──────────────────────────────────────────────────────────────
+  scroll.tick();
+  let gs = scroll.offset_y();   // vertical scroll offset
+  let hs = scroll.offset_x();   // horizontal scroll offset
+
+  // ── arrow-key scroll (sustained intent) ───────────────────────────────────
+  // inside on_key_press, ArrowDown held:
+  scroll.state().get_mut().set_intent_y(scroll.state().get().max_vel());
+  // clear when key released / cursor safely mid-viewport:
+  scroll.state().get_mut().set_intent_y(0.0);
+
+  // ── drag-edge scroll (velocity + intent together) ─────────────────────────
+  // inside on_mouse_move, pointer above editor top:
+  scroll.state().get_mut().set_vel_y(vel);
+  scroll.state().get_mut().set_intent_y(vel);
+  // on mouse release:
+  scroll.state().get_mut().set_vel_y(0.0);
+  scroll.state().get_mut().clear_intent();
+
+
+--------
+rounded_box.rs
+-------
+// ============================================================================
+// QUARTZ ROUNDED BOX API
+// ============================================================================
+// Complete API for creating rounded rectangles with borders, gradients,
+// shadows, and advanced styling options.
+//
+// PERFORMANCE NOTES:
+//   - Simple solid rounded boxes use ShapeType::RoundedRectangle for
+//     efficient GPU rendering and can be redrawn every frame with different
+//     colors without performance penalty.
+//   - Boxes with borders, gradients, or shadows use pixel-based rendering,
+//     which is slower and creates static images. Best used for UI elements
+//     that don't change every frame.
+//
+// USAGE:
+//   // Efficient (can change color per-frame):
+//   let box_img = RoundedBox::solid(200.0, 100.0, 12.0, color);
+//   let box_img = rounded_box(200.0, 100.0, 12.0, color);
+//
+//   // Feature-rich (borders, gradients, shadows - static):
+//   let box_img = RoundedBox::new(200.0, 100.0)
+//       .radius(8.0)
+//       .color(Color(255, 255, 255, 255))
+//       .border(2.0, Color(0, 0, 0, 255))
+//       .shadow(Shadow::soft())
+//       .build();
+//
+// ============================================================================
+
+
 ================================================================================
   END OF API REFERENCE
 ================================================================================

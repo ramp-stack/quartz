@@ -9,10 +9,12 @@ pub mod scene;
 pub mod camera;
 pub mod store;
 pub mod input;
+pub mod scroll;
 pub mod canvas;
 pub(crate) mod file_watcher;
 pub mod expr;
 pub mod crystalline;
+pub mod rounded_box;
 pub mod constraints;
 pub mod assets;
 pub mod timer;
@@ -57,6 +59,7 @@ pub use input::{
     InputState, Callback, MouseState, MouseCallback,
     MouseMoveCallback, MouseScrollCallback, CallbackStore, EventCallback,
 };
+pub use scroll::{ScrollConfig, ScrollState, ScrollView};
 
 pub use sound::{SoundOptions, SoundHandle};
 pub use expr::{parse_condition, parse_action};
@@ -67,6 +70,13 @@ pub use crystalline::{
     ParticleSystem, ParticleState, ParticleStepResult,
     Emitter, EmitterBuilder, Particle, CollisionResponse,
 };
+
+pub use rounded_box::{
+    RoundedBox, RoundedBoxBuilder, BorderStyle, Shadow,
+    GradientDirection, CornerRadius,
+    rounded_box, rounded_box_outline, rounded_box_bordered, rounded_box_gradient,
+};
+
 pub use constraints::{
     GrappleConstraint, GrappleCorrection, DistanceConstraint, SpringConstraint,
     SwingBias, solve_distance_constraint,
@@ -123,6 +133,7 @@ pub mod prelude {
         InputState, Callback, MouseState, MouseCallback,
         MouseMoveCallback, MouseScrollCallback, CallbackStore, EventCallback,
     };
+    pub use crate::scroll::{ScrollConfig, ScrollState, ScrollView};
 
     pub use crate::sound::{SoundOptions, SoundHandle};
     pub use crate::expr::{parse_condition, parse_action};
@@ -132,6 +143,12 @@ pub mod prelude {
         CrystallinePhysics, PhysicsBody, PhysicsStepResult, BodyUpdate,
         ParticleSystem, ParticleState, ParticleStepResult,
         Emitter, EmitterBuilder, Particle, CollisionResponse,
+    };
+
+    pub use crate::rounded_box::{
+        RoundedBox, RoundedBoxBuilder, BorderStyle, Shadow,
+        GradientDirection, CornerRadius,
+        rounded_box, rounded_box_outline, rounded_box_bordered, rounded_box_gradient,
     };
 
     pub use crate::constraints::{
