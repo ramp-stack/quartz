@@ -4576,7 +4576,7 @@ dependencies = [
 
 [[package]]
 name = "wgpu_canvas"
-version = "5.0.4"
+version = "5.0.8"
 dependencies = [
  "bytemuck",
  "fontdue",

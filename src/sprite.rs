@@ -275,6 +275,10 @@ pub struct AnimatedSprite {
     mirrored_h:            bool,
     mirrored_v:            bool,
     rotation:              RotationOptions,
+    /// When true, `get_current_image` and `update_animation` use
+    /// ShapeType::Ellipse instead of Rectangle. Set for circular objects
+    /// (gravity wells, black holes) so their glow is round, not square.
+    pub use_ellipse:       bool,
 }
 
 impl AnimatedSprite {
@@ -343,8 +347,14 @@ impl AnimatedSprite {
             mirrored_h:            false,
             mirrored_v:            false,
             rotation:              RotationOptions::default(),
+            use_ellipse:           false,
         }
     }
+
+    /// When `true`, this animation renders with a round (Ellipse) shape
+    /// instead of a rectangle.  Set this before calling `set_glow` so
+    /// that the glow outline matches the circular appearance.
+    pub fn set_ellipse_shape(&mut self, v: bool) { self.use_ellipse = v; }
 
     pub fn fps(&self) -> f32 { 1.0 / self.frame_duration }
 
@@ -360,8 +370,13 @@ impl AnimatedSprite {
         let mut pixels = self.frames[self.current_frame].clone();
         if self.mirrored_h { pixels = imageops::flip_horizontal(&pixels); }
         if self.mirrored_v { pixels = imageops::flip_vertical(&pixels); }
+        let shape = if self.use_ellipse {
+            ShapeType::Ellipse(0.0, self.size, self.rotation.to_radians())
+        } else {
+            ShapeType::Rectangle(0.0, self.size, self.rotation.to_radians())
+        };
         Image {
-            shape: ShapeType::Rectangle(0.0, self.size, self.rotation.to_radians()),
+            shape,
             image: pixels.into(),
             color: None,
         }
@@ -415,6 +430,18 @@ impl AnimatedSprite {
 
     pub fn rotate_180(&mut self) {
         self.frames = self.frames.iter().map(|f| imageops::rotate180(f)).collect();
+    }
+
+    /// Bake a vertical pixel-flip into every frame permanently.
+    /// Call once at bootstrap to pre-compute a flipped variant; zero per-frame cost.
+    pub fn flip_vertical_frames(&mut self) {
+        self.frames = self.frames.iter().map(|f| imageops::flip_vertical(f)).collect();
+    }
+
+    /// Bake a horizontal pixel-flip into every frame permanently.
+    /// Call once at bootstrap to pre-compute a mirrored variant; zero per-frame cost.
+    pub fn flip_horizontal_frames(&mut self) {
+        self.frames = self.frames.iter().map(|f| imageops::flip_horizontal(f)).collect();
     }
 }
 
