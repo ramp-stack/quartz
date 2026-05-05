@@ -8,19 +8,11 @@ use prism::drawable::{Drawable, SizedTree, RequestTree, Offset, Rect, Size};
 use prism::layout::{SizeRequest, Area};
 use prism::Context;
 use prism::canvas::{Image, ShapeType, Color};
-use crate::sprite::{AnimatedSprite, reload_image_raw, LAST_ASSET_PATH};
+use crate::sprite::AnimatedSprite;
 use crate::types::{CollisionMode, GlowConfig, GravityFalloff, HighlightEffect};
 use crate::crystalline::PhysicsMaterial;
 use wgpu_canvas::{Area as CanvasArea, Item as CanvasItem};
 use std::cell::Cell;
-
-pub(super) fn capture_asset_path() -> (Option<String>, Option<std::time::SystemTime>) {
-    let path = LAST_ASSET_PATH.with(|p| p.borrow_mut().take());
-    let mtime = path.as_ref()
-        .and_then(|p| std::fs::metadata(p).ok())
-        .and_then(|m| m.modified().ok());
-    (path, mtime)
-}
 
 #[derive(Clone, Debug)]
 pub struct GameObject {
@@ -39,10 +31,6 @@ pub struct GameObject {
     pub is_platform:     bool,
     pub visible:         bool,
     pub layer:           i32,
-    pub(crate) image_path:      Option<String>,
-    pub(crate) animation_path:  Option<String>,
-    pub(crate) image_mtime:     Option<std::time::SystemTime>,
-    pub(crate) animation_mtime: Option<std::time::SystemTime>,
     pub rotation:            f32,
     pub slope:               Option<(f32, f32)>,
     pub one_way:             bool,
@@ -76,14 +64,7 @@ pub struct GameObject {
     pub auto_align_speed:    f32,
     pub auto_align_threshold: f32,
     pub ignore_zoom:         bool,
-    /// Screen-pin anchor. When `Some`, the engine repositions this object every
-    /// frame so its anchor point on the viewport aligns with the same anchor
-    /// point on its bounding box. Implies `ignore_zoom = true`.
     pub screen_pin:          Option<crate::types::ScreenPin>,
-    /// Rotation pivot in normalised object space (0.0–1.0). Default `(0.5, 0.5)`
-    /// = centre. When pivot is `(0.5, 0.5)` the engine skips the bounding-box
-    /// expansion compensation, eliminating the frame-by-frame jitter on spinning
-    /// objects.
     pub pivot:               (f32, f32),
 }
 
@@ -108,30 +89,16 @@ impl GameObject {
         v
     }
 
-    /// Size reported to the parent layout — capped to the clip box when
-    /// clipping is active so we don't push sibling widgets around.
-    /// Accounts for rotation so the layout-derived bounds encompass the
-    /// full rotated AABB, preventing the shader bounds-check from clipping
-    /// visible fragments of rotated objects.
     fn reported_size(&self) -> Size {
         let base = if self.ped { self._size.unwrap_or(self.size) } else { self.size };
         if self.rotation == 0.0 {
             return base;
         }
-
-        // Use the same corner-rotation/min-max geometry as the renderer so
-        // parent layout bounds do not drift relative to the visual AABB.
-        // This avoids one-sided clipping that can look like pivot drift.
-
-        // Rotate all four corners around the pivot and take the AABB.
-        // Delegates to corners_world() — the single source of truth for this sweep.
-        // With pivot (0.5, 0.5) this produces the same result as before.
         let corners = self.corners_world();
         let min_x = corners.iter().map(|c| c.0).fold(f32::MAX, |a, b| a.min(b));
         let max_x = corners.iter().map(|c| c.0).fold(f32::MIN, |a, b| a.max(b));
         let min_y = corners.iter().map(|c| c.1).fold(f32::MAX, |a, b| a.min(b));
         let max_y = corners.iter().map(|c| c.1).fold(f32::MIN, |a, b| a.max(b));
-
         (max_x - min_x, max_y - min_y)
     }
 
@@ -143,7 +110,6 @@ impl GameObject {
         let (cw, ch) = self._size
             .map(|(w, h)| (w * s, h * s))
             .unwrap_or(self.size);
-        // return as (x, y, w, h) to match renderer expectation
         (cx, cy, cw, ch)
     }
 }
@@ -183,7 +149,6 @@ impl Drawable for GameObject {
 
         let bound = if self.ped {
             let cr = self.clip_rect(poffset);
-            // both bound and cr are (x, y, w, h)
             let x0 = bound.0.max(cr.0);
             let y0 = bound.1.max(cr.1);
             let x1 = (bound.0 + bound.2).min(cr.0 + cr.2);
@@ -223,7 +188,7 @@ impl Drawable for GameObject {
 impl GameObject {
     pub fn build(id: impl Into<String>) -> GameObjectBuilder {
         GameObjectBuilder {
-            id: id.into(), image: None, image_path: None, image_mtime: None,
+            id: id.into(), image: None,
             size: (100.0, 100.0), position: (0.0, 0.0), tags: vec![],
             momentum: (0.0, 0.0), resistance: (1.0, 1.0), gravity: 0.0,
             is_platform: false, layer: 0, rotation: 0.0, slope: None,
@@ -244,11 +209,7 @@ impl GameObject {
         }
     }
 
-    fn default_fields(
-        size: (f32, f32),
-        image_path:  Option<String>,
-        image_mtime: Option<std::time::SystemTime>,
-    ) -> Self {
+    fn default_fields(size: (f32, f32)) -> Self {
         Self {
             layout: prism::layout::Stack::default(),
             id: String::new(), tags: vec![], drawable: None, animated_sprite: None,
@@ -261,7 +222,6 @@ impl GameObject {
             rotation_momentum: 0.0, rotation_resistance: 0.85,
             surface_normal: (0.0, -1.0), collision_mode: CollisionMode::Surface,
             highlight: None, glow_drawable: None, tint_drawable: None, grounded: false,
-            image_path, image_mtime, animation_path: None, animation_mtime: None,
             material: PhysicsMaterial::default(), collision_layer: 0,
             collision_mask: u32::MAX, ped: false, _origin: None, _size: None,
             planet_radius: None, gravity_target: None, gravity_strength: 1.0,
@@ -282,8 +242,7 @@ impl GameObject {
         size: f32, position: (f32, f32), tags: Vec<String>,
         momentum: (f32, f32), resistance: (f32, f32), gravity: f32,
     ) -> Self {
-        let (image_path, image_mtime) = if drawable.is_some() { capture_asset_path() } else { (None, None) };
-        let mut s = Self::default_fields((size, size), image_path, image_mtime);
+        let mut s = Self::default_fields((size, size));
         s.id = id; s.tags = tags; s.position = position;
         s.momentum = momentum; s.resistance = resistance; s.gravity = gravity;
         s.drawable = drawable.map(|d| Box::new(d) as Box<dyn Drawable>);
@@ -295,8 +254,7 @@ impl GameObject {
         size: (f32, f32), position: (f32, f32), tags: Vec<String>,
         momentum: (f32, f32), resistance: (f32, f32), gravity: f32,
     ) -> Self {
-        let (image_path, image_mtime) = if drawable.is_some() { capture_asset_path() } else { (None, None) };
-        let mut s = Self::default_fields(size, image_path, image_mtime);
+        let mut s = Self::default_fields(size);
         s.id = id; s.tags = tags; s.position = position;
         s.momentum = momentum; s.resistance = resistance; s.gravity = gravity;
         s.drawable = drawable.map(|d| Box::new(d) as Box<dyn Drawable>);
@@ -304,15 +262,11 @@ impl GameObject {
     }
 
     pub fn with_animation(mut self, animated_sprite: AnimatedSprite) -> Self {
-        let (path, mtime) = capture_asset_path();
-        if path.is_some() { self.animation_path = path; self.animation_mtime = mtime; }
         self.animated_sprite = Some(animated_sprite);
         self
     }
 
     pub fn with_image(mut self, image: Image) -> Self {
-        let (path, mtime) = capture_asset_path();
-        if path.is_some() { self.image_path = path; self.image_mtime = mtime; }
         self.drawable = Some(Box::new(image));
         self
     }
@@ -327,25 +281,19 @@ impl GameObject {
 
     pub fn set_gravity(&mut self, gravity: f32) { self.gravity = gravity; }
 
-    /// Move this object so its **centre** is at `(cx, cy)`.
     pub fn set_center(&mut self, cx: f32, cy: f32) {
         self.position = (cx - self.size.0 * 0.5, cy - self.size.1 * 0.5);
     }
 
-    /// Returns the current centre of this object in world/screen space.
     pub fn center(&self) -> (f32, f32) {
         (self.position.0 + self.size.0 * 0.5, self.position.1 + self.size.1 * 0.5)
     }
 
     pub fn set_animation(&mut self, animated_sprite: AnimatedSprite) {
-        let (path, mtime) = capture_asset_path();
-        if path.is_some() { self.animation_path = path; self.animation_mtime = mtime; }
         self.animated_sprite = Some(animated_sprite);
     }
 
     pub fn set_image(&mut self, image: Image) {
-        let (path, mtime) = capture_asset_path();
-        if path.is_some() { self.image_path = path; self.image_mtime = mtime; }
         self.drawable = Some(Box::new(image));
     }
 
@@ -475,34 +423,5 @@ impl GameObject {
     pub fn clear_highlight(&mut self) {
         self.highlight = None;
         self.rebuild_highlight_drawables();
-    }
-
-    pub(crate) fn hot_reload_image(&mut self, path: &str) {
-        let Ok(meta)  = std::fs::metadata(path) else { return };
-        let Ok(mtime) = meta.modified()          else { return };
-        if Some(mtime) == self.image_mtime { return; }
-        let img = reload_image_raw(path, self.size);
-        self.image_mtime = Some(mtime);
-        self.drawable    = Some(Box::new(img));
-        println!("[hot-reload] image reloaded: {path}");
-    }
-
-    pub(crate) fn hot_reload_animation(&mut self, path: &str) {
-        let Ok(meta)  = std::fs::metadata(path) else { return };
-        let Ok(mtime) = meta.modified()          else { return };
-        if Some(mtime) == self.animation_mtime { return; }
-        let fps  = self.animated_sprite.as_ref().map(|s| s.fps()).unwrap_or(12.0);
-        let size = self.size;
-        match std::fs::read(path) {
-            Ok(bytes) => match AnimatedSprite::decode_vec(bytes, size, fps) {
-                Ok(sprite) => {
-                    self.animated_sprite  = Some(sprite);
-                    self.animation_mtime  = Some(mtime);
-                    println!("[hot-reload] animation reloaded: {path}");
-                }
-                Err(e) => eprintln!("[hot-reload] failed to read '{path}': {e}"),
-            },
-            Err(e) => eprintln!("[hot-reload] failed to open '{path}': {e}"),
-        }
     }
 }

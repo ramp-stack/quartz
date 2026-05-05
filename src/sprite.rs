@@ -13,8 +13,6 @@ pub fn solid_circle(size: f32, color: Color) -> Image {
     }
 }
 
-/// GPU-rendered ellipse: zero CPU rasterization cost.
-/// Uses a 1×1 white pixel with a color tint and `ShapeType::Ellipse` mask.
 pub fn solid_ellipse(w: f32, h: f32, color: Color) -> Image {
     Image {
         shape: ShapeType::Ellipse(0.0, (w, h), 0.0),
@@ -61,7 +59,7 @@ pub fn planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size
             let dy = py as f32 - cx + 0.5;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            let (alpha, brightness) = if dist <=rf {
+            let (alpha, brightness) = if dist <= rf {
                 let rim = ((rf - dist) / rf).min(1.0);
                 (255u8, 0.7 + 0.3 * rim)
             } else if atm_px > 0.0 && dist <= rf + atm_px {
@@ -69,7 +67,7 @@ pub fn planet_atmosphere(radius: u32, r: u8, g: u8, b: u8, atmosphere: f32, size
                 let alpha = ((1.0 - t) * 180.0) as u8;
                 (alpha, 0.6 + 0.15 * (1.0 - t))
             } else {
-                continue;                
+                continue;
             };
 
             img.put_pixel(px, py, Rgba([
@@ -111,7 +109,7 @@ pub fn tint_overlay(w: f32, h: f32, color: Color) -> Image {
     }
 }
 
-pub(crate) fn generate_planet_rgba(radius: u32, r: u8, g: u8, b: u8, brightness_scale: f32,) -> RgbaImage {
+pub(crate) fn generate_planet_rgba(radius: u32, r: u8, g: u8, b: u8, brightness_scale: f32) -> RgbaImage {
     let diameter = radius * 2;
     let mut img = RgbaImage::new(diameter, diameter);
     let cx = radius as f32;
@@ -132,53 +130,32 @@ pub(crate) fn generate_planet_rgba(radius: u32, r: u8, g: u8, b: u8, brightness_
                 (r as f32 * brightness).min(255.0) as u8,
                 (g as f32 * brightness).min(255.0) as u8,
                 (b as f32 * brightness).min(255.0) as u8,
-                255,                
+                255,
             ]));
         }
     }
 
     img
-
 }
 
-thread_local! {
-    pub(crate) static LAST_ASSET_PATH: RefCell<Option<String>> = RefCell::new(None);
-}
-
-pub fn load_image(path: &str) -> Image {
-    LAST_ASSET_PATH.with(|p| *p.borrow_mut() = Some(path.to_string()));
-    let rgba = image::open(path)
-        .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
+pub fn load_image(bytes: &[u8]) -> Image {
+    let rgba = image::load_from_memory(bytes)
+        .expect("quartz: cannot decode image from bytes")
         .into_rgba8();
     let (w, h) = (rgba.width() as f32, rgba.height() as f32);
     make_image(rgba, w, h)
 }
 
-pub fn load_image_sized(path: &str, w: f32, h: f32) -> Image {
-    LAST_ASSET_PATH.with(|p| *p.borrow_mut() = Some(path.to_string()));
-    let rgba = image::open(path)
-        .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
+pub fn load_image_sized(bytes: &[u8], w: f32, h: f32) -> Image {
+    let rgba = image::load_from_memory(bytes)
+        .expect("quartz: cannot decode image from bytes")
         .into_rgba8();
     make_image(rgba, w, h)
 }
 
-/// Load an animated GIF from a file path. Registers the path automatically
-/// for hot-reloading — no extra setup required.
-pub fn load_animation(path: &str, size: (f32, f32), fps: f32) -> AnimatedSprite {
-    LAST_ASSET_PATH.with(|p| *p.borrow_mut() = Some(path.to_string()));
-    let bytes = std::fs::read(path)
-        .unwrap_or_else(|_| panic!("quartz: cannot read animation '{}'", path));
-    AnimatedSprite::decode_vec(bytes, size, fps)
-        .unwrap_or_else(|e| panic!("quartz: failed to decode animation '{}': {}", path, e))
-}
-
-/// Re-read an image from disk at a fixed size without touching the thread-local.
-/// Used internally by hot-reload; not part of the public API.
-pub(crate) fn reload_image_raw(path: &str, size: (f32, f32)) -> Image {
-    let rgba = image::open(path)
-        .unwrap_or_else(|_| panic!("quartz: cannot open image '{}'", path))
-        .into_rgba8();
-    make_image(rgba, size.0, size.1)
+pub fn load_animation(bytes: &[u8], size: (f32, f32), fps: f32) -> AnimatedSprite {
+    AnimatedSprite::decode_vec(bytes.to_vec(), size, fps)
+        .expect("quartz: failed to decode animation from bytes")
 }
 
 pub fn flip_horizontal(img: Image) -> Image {
@@ -278,12 +255,10 @@ pub struct AnimatedSprite {
 }
 
 impl AnimatedSprite {
-    /// Create from static bytes (e.g. `include_bytes!`). Does not register for hot-reload.
     pub fn new(gif_bytes: &[u8], size: (f32, f32), fps: f32) -> Result<Self, String> {
         Self::decode_slice(gif_bytes, size, fps)
     }
 
-    /// Create from an owned Vec<u8>. Used by `load_animation` and hot-reload internally.
     pub(crate) fn decode_vec(bytes: Vec<u8>, size: (f32, f32), fps: f32) -> Result<Self, String> {
         Self::decode_slice(&bytes, size, fps)
     }
@@ -302,14 +277,6 @@ impl AnimatedSprite {
             return Err("GIF has no frames".to_string());
         }
 
-        // Fit each frame within the requested display size, preserving the
-        // GIF's native aspect ratio (uniform scale), then center on a
-        // transparent canvas sized to the display dimensions. This ensures:
-        //   1) pixel size == display size → the renderer never UV-crops
-        //   2) proportions are preserved across animations of different
-        //      native dimensions (idle 38×59, running 43×60, walking 32×60
-        //      all produce the same character scale inside e.g. 200×200)
-        //   3) transparent padding fills unused space
         let tw = size.0.round().max(1.0) as u32;
         let th = size.1.round().max(1.0) as u32;
         frames = frames.into_iter().map(|f| {
@@ -432,7 +399,6 @@ impl std::fmt::Debug for AnimatedSprite {
     }
 }
 
-/// Generates a procedural star field image with randomly placed stars.
 pub fn star_field(width: u32, height: u32, star_count: u32, seed: u64) -> Image {
     let mut img = RgbaImage::from_pixel(width, height, Rgba([5, 5, 15, 255]));
 
@@ -474,4 +440,3 @@ pub fn star_field(width: u32, height: u32, star_count: u32, seed: u64) -> Image 
         color: None,
     }
 }
-

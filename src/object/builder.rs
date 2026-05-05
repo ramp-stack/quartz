@@ -5,13 +5,11 @@ use crate::types::{CollisionMode, GlowConfig, GravityFalloff, HighlightEffect, c
 use crate::crystalline::PhysicsMaterial;
 use std::cell::Cell;
 
-use super::{GameObject, capture_asset_path};
+use super::GameObject;
 
 pub struct GameObjectBuilder {
     pub(super) id:          String,
     pub(super) image:       Option<Image>,
-    pub(super) image_path:  Option<String>,
-    pub(super) image_mtime: Option<std::time::SystemTime>,
     pub(super) size:        (f32, f32),
     pub(super) position:    (f32, f32),
     pub(super) tags:        Vec<String>,
@@ -57,9 +55,6 @@ impl GameObjectBuilder {
     pub fn layer(mut self, id: i32) -> Self { self.layer = id; self }
 
     pub fn image(mut self, image: Image) -> Self {
-        let (path, mtime) = capture_asset_path();
-        self.image_path  = path;
-        self.image_mtime = mtime;
         self.image = Some(image);
         self
     }
@@ -207,23 +202,13 @@ impl GameObjectBuilder {
     }
     pub fn ignore_zoom(mut self) -> Self { self.ignore_zoom = true; self }
 
-    // ── Positioning helpers ───────────────────────────────────────────────
-
-    /// Position the object so its **centre** is at `(cx, cy)`.
-    /// Call after `.size()` — depends on the current size.
     pub fn center_at(mut self, cx: f32, cy: f32) -> Self {
         self.position = (cx - self.size.0 * 0.5, cy - self.size.1 * 0.5);
         self
     }
 
-    // ── Screen-space helpers ─────────────────────────────────────────────
-
-    /// Marks this object as screen-space: ignores camera position and zoom.
-    /// Semantic alias for `.ignore_zoom()`. Use for HUD elements, overlays, backgrounds.
     pub fn screen_space(self) -> Self { self.ignore_zoom() }
 
-    /// Pin to a normalised screen anchor with no offset. Also sets screen-space.
-    /// `anchor_x/y`: `0.0` = left/top, `1.0` = right/bottom, `0.5` = centre.
     pub fn pin(mut self, anchor_x: f32, anchor_y: f32) -> Self {
         self.screen_pin = Some(crate::types::ScreenPin {
             anchor: (anchor_x, anchor_y),
@@ -233,44 +218,22 @@ impl GameObjectBuilder {
         self
     }
 
-    /// Add a pixel offset to the most-recently set pin. Chain after `.pin()` or
-    /// any `.pin_*()` convenience method.
     pub fn pin_offset(mut self, ox: f32, oy: f32) -> Self {
         if let Some(ref mut p) = self.screen_pin { p.offset = (ox, oy); }
         self
     }
 
-    /// Pin the object's top-left corner `(ox, oy)` pixels from the viewport top-left.
     pub fn pin_top_left(self, ox: f32, oy: f32) -> Self { self.pin(0.0, 0.0).pin_offset(ox, oy) }
-    /// Pin the object's top-right corner `(ox, oy)` pixels from the viewport top-right.
-    /// Negative `ox` insets from the right edge.
     pub fn pin_top_right(self, ox: f32, oy: f32) -> Self { self.pin(1.0, 0.0).pin_offset(ox, oy) }
-    /// Pin the object horizontally centred, `oy` pixels from the top.
     pub fn pin_top_center(self, oy: f32) -> Self { self.pin(0.5, 0.0).pin_offset(0.0, oy) }
-    /// Pin the object's bottom-left corner `(ox, oy)` pixels from the viewport bottom-left.
-    /// Negative `oy` insets from the bottom edge.
     pub fn pin_bottom_left(self, ox: f32, oy: f32) -> Self { self.pin(0.0, 1.0).pin_offset(ox, oy) }
-    /// Pin the object's bottom-right corner `(ox, oy)` pixels from the viewport bottom-right.
     pub fn pin_bottom_right(self, ox: f32, oy: f32) -> Self { self.pin(1.0, 1.0).pin_offset(ox, oy) }
-    /// Pin the object horizontally centred, `oy` pixels from the bottom.
-    /// Negative `oy` insets from the bottom edge.
     pub fn pin_bottom_center(self, oy: f32) -> Self { self.pin(0.5, 1.0).pin_offset(0.0, oy) }
-    /// Pin the object to the exact centre of the viewport.
     pub fn pin_center(self) -> Self { self.pin(0.5, 0.5) }
-    /// Stretch to fill the entire viewport every frame.
-    /// The object's `size` is overwritten by the engine to match canvas size.
     pub fn fill_screen(self) -> Self { self.pin(0.0, 0.0) }
 
-    // ── Rotation pivot ───────────────────────────────────────────────────
-
-    /// Rotate this object around its geometric centre, eliminating the
-    /// sub-pixel jitter that occurs when `rotation_momentum` is used.
-    /// This is the default — call it for clarity when rotation stability matters.
     pub fn rotate_around_center(mut self) -> Self { self.pivot = (0.5, 0.5); self }
 
-    /// Set a custom normalised rotation pivot `(px, py)`.
-    /// `(0.0, 0.0)` = top-left (legacy bounding-box behaviour).
-    /// `(0.5, 0.5)` = centre (default, recommended for spinning objects).
     pub fn pivot(mut self, px: f32, py: f32) -> Self { self.pivot = (px, py); self }
 
     pub fn gravity_well(mut self, radius: f32, strength: f32) -> Self {
@@ -308,7 +271,7 @@ impl GameObjectBuilder {
 
     pub fn build(self, _ctx: &mut Context) -> GameObject { self.finish() }
 
-        pub fn finish(self) -> GameObject {
+    pub fn finish(self) -> GameObject {
         let size      = self.size;
         let highlight = self.highlight;
         let mut obj   = GameObject {
@@ -339,10 +302,6 @@ impl GameObjectBuilder {
             glow_drawable:       None,
             tint_drawable:       None,
             grounded:            false,
-            image_path:          self.image_path,
-            image_mtime:         self.image_mtime,
-            animation_path:      None,
-            animation_mtime:     None,
             material:            self.material,
             collision_layer:     self.collision_layer,
             collision_mask:      self.collision_mask,

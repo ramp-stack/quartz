@@ -414,13 +414,6 @@ impl Canvas {
         if self.hot_reload_timer < 0.5 { return; }
         self.hot_reload_timer = 0.0;
 
-        for obj in self.store.objects.iter_mut() {
-            let image_path = obj.image_path.clone();
-            let anim_path  = obj.animation_path.clone();
-            if let Some(path) = image_path { obj.hot_reload_image(&path); }
-            if let Some(path) = anim_path  { obj.hot_reload_animation(&path); }
-        }
-
         let changed: Vec<(usize, Vec<u8>)> = self.file_watchers
             .iter_mut()
             .enumerate()

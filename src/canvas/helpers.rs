@@ -1,10 +1,7 @@
 use super::core::Canvas;
 use prism::canvas::Image;
 
-// ── Tag-based object queries ─────────────────────────────────────────────
-
 impl Canvas {
-    /// Return names of all objects with a given tag.
     pub fn get_names_by_tag(&self, tag: &str) -> Vec<String> {
         self.store.tag_to_indices.get(tag)
             .map(|indices| {
@@ -13,21 +10,16 @@ impl Canvas {
             .unwrap_or_default()
     }
 
-    /// Count objects with a tag.
     pub fn count_by_tag(&self, tag: &str) -> usize {
         self.store.tag_to_indices.get(tag).map_or(0, |v| v.len())
     }
 
-    /// Check if any object with this tag exists.
     pub fn has_tag(&self, tag: &str) -> bool {
         self.store.tag_to_indices.get(tag).map_or(false, |v| !v.is_empty())
     }
 }
 
-// ── Object pool system ───────────────────────────────────────────────────
-
 impl Canvas {
-    /// Pre-spawn `count` hidden copies of a template object, tagged with `pool_tag`.
     pub fn create_pool(&mut self, pool_tag: &str, template: crate::GameObject, count: usize) {
         for i in 0..count {
             let name = format!("_pool_{}_{}", pool_tag, i);
@@ -40,7 +32,6 @@ impl Canvas {
         }
     }
 
-    /// Acquire one object from pool: shows it, resets position/momentum, returns its name.
     pub fn pool_acquire(&mut self, pool_tag: &str, position: (f32, f32)) -> Option<String> {
         let pool_tag_key = format!("_pool:{}", pool_tag);
         let pool_indices = self.store.tag_to_indices.get(&pool_tag_key)?.clone();
@@ -67,7 +58,6 @@ impl Canvas {
         None
     }
 
-    /// Release an object back to pool: hides it, zeros momentum.
     pub fn pool_release(&mut self, name: &str) {
         if let Some(&idx) = self.store.name_to_index.get(name) {
             if let Some(obj) = self.store.objects.get_mut(idx) {
@@ -84,7 +74,6 @@ impl Canvas {
         }
     }
 
-    /// Release all active objects in a pool.
     pub fn pool_release_all(&mut self, pool_tag: &str) {
         let key = format!("_pool:{}", pool_tag);
         let names: Vec<String> = self.get_names_by_tag(&key);
@@ -93,7 +82,6 @@ impl Canvas {
         }
     }
 
-    /// How many pool objects are available (free).
     pub fn pool_available(&self, pool_tag: &str) -> usize {
         let key = format!("_pool:{}", pool_tag);
         let pool = self.store.tag_to_indices.get(&key).cloned().unwrap_or_default();
@@ -101,7 +89,6 @@ impl Canvas {
         pool.iter().filter(|i| free.contains(i)).count()
     }
 
-    /// How many pool objects are currently active (in use).
     pub fn pool_active(&self, pool_tag: &str) -> usize {
         let key = format!("_pool:{}", pool_tag);
         let pool = self.store.tag_to_indices.get(&key).cloned().unwrap_or_default();
@@ -110,42 +97,30 @@ impl Canvas {
     }
 }
 
-// ── Image cache ──────────────────────────────────────────────────────────
-
 impl Canvas {
-    /// Load an image, caching by path. Subsequent calls return a clone.
-    pub fn load_image_cached(&mut self, path: &str) -> Image {
-        self.image_cache.get_or_create(path, || crate::sprite::load_image(path))
+    pub fn load_image_cached(&mut self, key: &str, bytes: &[u8]) -> Image {
+        self.image_cache.get_or_create(key, || crate::sprite::load_image(bytes))
     }
 
-    /// Load a sized image, caching by path+dimensions.
-    pub fn load_image_sized_cached(&mut self, path: &str, w: f32, h: f32) -> Image {
-        let key = format!("{}:{}x{}", path, w, h);
-        self.image_cache.get_or_create(key, || crate::sprite::load_image_sized(path, w, h))
+    pub fn load_image_sized_cached(&mut self, key: &str, bytes: &[u8], w: f32, h: f32) -> Image {
+        let cache_key = format!("{}:{}x{}", key, w, h);
+        self.image_cache.get_or_create(cache_key, || crate::sprite::load_image_sized(bytes, w, h))
     }
 
-    /// Get or create a cached image by key, calling `f` on a miss.
     pub fn get_or_create_image(&mut self, key: impl Into<String>, f: impl FnOnce() -> Image) -> Image {
         self.image_cache.get_or_create(key, f)
     }
 
-    /// Clear the image cache.
     pub fn clear_image_cache(&mut self) {
         self.image_cache.clear();
     }
 }
 
-// ── Planet gravity math helpers ──────────────────────────────────────────
-
-/// Returns the orbital speed for a circular orbit at the given distance.
-/// Formula: v = sqrt(gravity_strength * planet_radius / dist)
 pub fn orbit_speed(gravity_strength: f32, planet_radius: f32, orbit_dist: f32) -> f32 {
     if orbit_dist <= 0.0 { return 0.0; }
     (gravity_strength * planet_radius / orbit_dist).sqrt()
 }
 
-/// Returns the escape speed from a given distance.
-/// Formula: v_esc = sqrt(2) * orbit_speed
 pub fn escape_speed(gravity_strength: f32, planet_radius: f32, dist: f32) -> f32 {
     orbit_speed(gravity_strength, planet_radius, dist) * std::f32::consts::SQRT_2
 }
