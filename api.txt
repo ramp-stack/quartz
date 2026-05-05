@@ -1720,6 +1720,196 @@ rounded_box.rs
 // ============================================================================
 
 
+--------------------------------------------------------------------------------
+  MODULE: json_layout  (json_layout.rs)
+--------------------------------------------------------------------------------
+
+A data-driven UI layout system. Objects, events, variables, and reactions are
+all declared in JSON files. No Rust code is needed to build or navigate UIs.
+
+USAGE — MULTI-FILE
+  1. Call setup_events(cv, events_path, layout_paths) ONCE at startup.
+     events_path  = path to your events/vars/reactions JSON file.
+     layout_paths = slice of all layout file paths (registers on_click /
+                    on_hover across all pages up front).
+  2. Call load_objects_from_file(cv, page_path, fonts) to spawn the first page.
+  3. Call reload_objects_from_file(cv, new_page_path, fonts) to navigate pages.
+  4. Call process_reactions(cv, fonts) every tick in on_update.
+
+USAGE — SINGLE FILE
+  Pass an empty slice for layout_paths:
+    setup_events(cv, "./app.json", &[])
+  Then call load_objects_from_file and process_reactions as normal.
+
+--------------------------------------------------------------------------------
+  PUBLIC FUNCTIONS
+--------------------------------------------------------------------------------
+
+setup_events(cv: &mut Canvas, events_path: &str, layout_paths: &[&str])
+  Call ONCE at startup. Reads the events JSON file and:
+    - Initialises all declared vars on the canvas.
+    - Stores all reaction metadata in canvas vars for process_reactions.
+    - Scans events_path and all layout_paths for on_click / on_hover
+      bindings and registers them for hit-testing.
+    - Registers on_key_press, on_key_release, on_mouse_press,
+      on_mouse_release, on_mouse_scroll, and on_mouse_move callbacks
+      for all declared event bindings.
+
+load_objects(cv: &mut Canvas, json_str: &str, fonts: &HashMap<String, Arc<Font>>)
+  Parses a layout JSON string and spawns all objects onto the canvas.
+  Also initialises any vars declared in the JSON that are not already set.
+  Use this when you already have the JSON string in memory.
+
+load_objects_from_file(cv: &mut Canvas, path: &str, fonts: &HashMap<String, Arc<Font>>)
+  Reads a layout JSON file from disk and calls load_objects.
+  Stores the current path in __current_layout for reload tracking.
+
+reload_objects(cv: &mut Canvas, json_str: &str, fonts: &HashMap<String, Arc<Font>>)
+  Removes all objects declared in the JSON, then re-spawns them.
+  Use for in-place refresh of the current page.
+
+reload_objects_from_file(cv: &mut Canvas, path: &str, fonts: &HashMap<String, Arc<Font>>)
+  Reads the previous layout path from __current_layout, removes all of its
+  objects, then loads the new path. Use for page navigation.
+  Safe to call with the same path (acts as a full page refresh).
+
+process_reactions(cv: &mut Canvas, fonts: &HashMap<String, Arc<Font>>)
+  Evaluates all registered reactions and applies property changes to target
+  objects. Dirty-tracks each watched variable — only fires when the value
+  or matched branch has changed since the last tick. Call once per frame.
+
+--------------------------------------------------------------------------------
+  JSON FILE STRUCTURE
+--------------------------------------------------------------------------------
+
+  {
+    "vars":      { "key": "value", ... },
+    "events":    [ { event binding }, ... ],
+    "reactions": [ { reaction }, ... ],
+    "objects":   [ { object def }, ... ]
+  }
+
+  vars, events, and reactions may all live in the events file passed to
+  setup_events, or in the same file as objects (single-file mode).
+  Vars declared in a layout file are only initialised if not already set,
+  making them safe to declare across multiple pages without clobbering state.
+
+--------------------------------------------------------------------------------
+  OBJECT FIELDS
+--------------------------------------------------------------------------------
+
+  "kind"          "rect" | "rounded_rect" | "text"
+  "id"            Unique string identifier. Required.
+  "w", "h"        Size in virtual canvas pixels.
+  "x", "y"        Position (top-left) in virtual canvas pixels.
+  "cx"            Horizontal offset from canvas centre. Centres the object
+                  on the horizontal axis (overrides "x").
+  "pin"           Viewport anchor: "center" | "top_left" | "top_right" |
+                  "top_center" | "bottom_left" | "bottom_right" |
+                  "bottom_center". Implies ignore_zoom.
+  "pin_offset_x"  Pixel nudge applied after pinning. Default 0.
+  "pin_offset_y"  Pixel nudge applied after pinning. Default 0.
+  "fill_screen"   true → stretches to fill the full canvas.
+  "ignore_zoom"   true → exempt from camera zoom (HUD objects).
+  "layer"         Render layer (i32). Default 5.
+  "visible"       false → spawns hidden. Default true.
+  "on_click"      Var name. Set to this object's id on left-click.
+  "on_hover"      Var name. Set to this object's id on hover, "" on leave.
+
+  RECT / ROUNDED_RECT ONLY
+  "color"         [r, g, b, a]
+  "radius"        Corner radius. rounded_rect only.
+  "border_width"  Stroke width. rounded_rect only.
+  "border_color"  [r, g, b, a]. rounded_rect only.
+
+  TEXT ONLY
+  "text"          Literal string content.
+  "font"          Key into the fonts map. Default "body".
+  "font_size"     Size in logical screen pixels — auto-scaled to virtual
+                  canvas via virtual_scale().
+  "color"         [r, g, b, a]
+  "align"         "left" | "center" | "right"
+
+--------------------------------------------------------------------------------
+  EVENT BINDINGS
+--------------------------------------------------------------------------------
+
+  { "on": "key_press",     "key": "Space" | "any", "set_var": "v", "value": "$key" }
+  { "on": "key_release",   "key": "Space" | "any", "set_var": "v", "value": "$key" }
+  { "on": "mouse_press",                            "set_var": "v", "value": "$btn" }
+  { "on": "mouse_release",                          "set_var": "v", "value": "$btn" }
+  { "on": "scroll",                                 "set_var": "v", "value": "$dir" }
+  { "on": "mouse_move",                             "set_var": "v", "value": "$x,$y" }
+
+  Token substitutions in "value":
+    $key  →  key name string (key_press / key_release)
+    $btn  →  "left" | "right" | "middle"
+    $dir  →  "up" | "down"
+    $x    →  mouse X in virtual canvas pixels (integer)
+    $y    →  mouse Y in virtual canvas pixels (integer)
+
+--------------------------------------------------------------------------------
+  REACTIONS
+--------------------------------------------------------------------------------
+
+  {
+    "watch":     "var_name",
+    "condition": "equals" | "not_empty" | "empty",
+    "equals":    "value",          (only used when condition is "equals")
+    "target":    "object_id",
+    "set":  { ... props ... },
+    "else": { ... props ... }      (optional)
+  }
+
+  When the condition matches, "set" props are applied to the target object.
+  When it does not match, "else" props are applied (if present).
+  Reactions are dirty-tracked — props are only applied when the watched
+  variable's value or matched branch changes.
+
+  REACTION PROPS
+    "visible"        true | false
+    "color"          [r, g, b, a]   background fill
+    "border_color"   [r, g, b, a]
+    "border_width"   stroke width (f32)
+    "text"           literal string
+    "text_from_var"  var name — use the var's value as the text string
+    "text_format"    template string with $var_name tokens
+    "text_color"     [r, g, b, a]
+    "font"           key into fonts map
+    "font_size"      logical screen pixels (auto-scaled)
+    "align"          "left" | "center" | "right"
+
+  TEXT RESOLUTION PRIORITY (highest → lowest):
+    1. text_format   — template with $var_name substitution
+    2. text_from_var — full text taken from the named var
+    3. text          — literal string
+
+  TEXT FORMAT TOKENS
+    Any $var_name token in a text_format string is replaced with the current
+    value of that canvas var. Tokens may be any alphanumeric + underscore name.
+    Example: "Score: $score / $max_score"
+
+--------------------------------------------------------------------------------
+  POSITIONING PRIORITY (highest → lowest)
+--------------------------------------------------------------------------------
+
+  1. "fill_screen": true       →  .fill_screen()  (stretches to canvas)
+  2. "pin" field present       →  .pin_*()        (viewport-anchored, HUD)
+  3. "cx" field present        →  .center_at(canvas_w/2 + cx, y + h/2)
+  4. "x" / "y"                 →  .position(x, y)
+
+--------------------------------------------------------------------------------
+  INTERNAL CANVAS VARS (set by json_layout — do not write manually)
+--------------------------------------------------------------------------------
+
+  __current_layout        Path of the currently loaded layout file.
+  __rx_count              Total number of registered reactions.
+  __rx_{n}_w/c/e/t/s/x    Per-reaction watch/condition/equals/target/set/else.
+  __rx_{n}_last           Dirty-tracking cache for reaction n.
+  __jl_ids                Comma-separated list of interactive object ids.
+  __jl_click_{id}         Var name to set on click for object {id}.
+  __jl_hover_{id}         Var name to set on hover for object {id}.
+  __ev_kp/kr/mp/mr/sc/mm  Serialised event binding tables (newline-separated).
 ================================================================================
   END OF API REFERENCE
 ================================================================================

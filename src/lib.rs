@@ -18,12 +18,14 @@ pub mod rounded_box;
 pub mod constraints;
 pub mod assets;
 pub mod timer;
+pub mod json_layout;
 
 pub use std::sync::Arc;
 
 pub use prism::Context;
 pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
 pub use prism::event::{Key, NamedKey};
+
 
 pub use types::{
     Action, Condition, GameEvent,
@@ -93,11 +95,10 @@ pub use value::{
 
 pub mod prelude {
     pub use std::sync::Arc;
-
+    pub use crate::json_layout::{load_objects, load_objects_from_file};
     pub use prism::Context;
     pub use prism::canvas::{ShapeType, Image, Text, Span, Align, Font, Color};
     pub use prism::event::{Key, NamedKey};
-    pub use prism::Assets;
 
     pub use crate::types::{
         Action, Condition, GameEvent,

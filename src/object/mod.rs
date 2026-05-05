@@ -157,16 +157,16 @@ impl Drawable for GameObject {
         RequestTree(SizeRequest::fixed(self.reported_size()), child_requests)
     }
 
-    fn build(&self, size: Size, request: RequestTree) -> SizedTree {
+    fn build(&self, size: Size, request: &RequestTree) -> SizedTree {
         let own_size   = request.0.get(size);
         let child_size = self.size;
         SizedTree(
             own_size,
             self.active_children()
                 .into_iter()
-                .zip(request.1)
+                .zip(request.1.clone())
                 .map(|(child, branch)| {
-                    let built = child.build(child_size, branch);
+                    let built = child.build(child_size, &branch);
                     ((0.0_f32, 0.0_f32), built)
                 })
                 .collect(),

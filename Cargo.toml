@@ -10,5 +10,6 @@ ramp  = { package = "ramp2", path = "../ramp"}
 wgpu_canvas = {path="../wgpu_canvas", default-features = false}
 rand = "0.8"
 rodio = "0.21.1"
+serde_json = "1.0.149"
 
 
