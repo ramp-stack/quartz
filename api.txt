@@ -57,7 +57,7 @@ src/
     solver.rs               CrystallinePhysics solver, SleepState
     particles/
       mod.rs                re-exports
-      types.rs              Emitter, EmitterBuilder, Particle, CollisionResponse
+      types.rs              Emitter, EmitterBuilder, Particle, CollisionResponse, ParticleShape
       system.rs             ParticleSystem, ParticleState, ParticleStepResult
 
 IMPORT RULES
@@ -814,7 +814,12 @@ Action  (enum, Clone, Debug)
   SetEmitterVelocity      { name: String, value: (f32, f32) }
   SetEmitterSpread        { name: String, value: (f32, f32) }
   SetEmitterSize          { name: String, value: f32 }
+  SetEmitterSizeEnd       { name: String, value: f32 }
   SetEmitterColor         { name: String, value: (u8, u8, u8, u8) }
+  SetEmitterColorEnd      { name: String, value: Option<(u8, u8, u8, u8)> }
+  SetEmitterShape         { name: String, value: ParticleShape }
+  SetEmitterAlignToVelocity     { name: String, value: bool }
+  SetEmitterInterpolatePosition { name: String, value: bool }
   SetEmitterGravityScale  { name: String, value: f32 }
   SetEmitterCollision     { name: String, value: CollisionResponse }
   SetEmitterRenderLayer   { name: String, value: i32 }
@@ -889,7 +894,13 @@ Action builder methods (all return Action):
   Action::set_emitter_velocity(name, vx, vy)
   Action::set_emitter_spread(name, sx, sy)
   Action::set_emitter_size(name, value)
+  Action::set_emitter_size_end(name, value)
   Action::set_emitter_color(name, r, g, b, a)
+  Action::set_emitter_color_end(name, r, g, b, a)
+  Action::clear_emitter_color_end(name)
+  Action::set_emitter_shape(name, shape)
+  Action::set_emitter_align_to_velocity(name, value)
+  Action::set_emitter_interpolate_position(name, value)
   Action::set_emitter_gravity_scale(name, value)
   Action::set_emitter_collision(name, value)
   Action::set_emitter_render_layer(name, value)
@@ -1543,9 +1554,23 @@ Emitter presets: fire / smoke / sparks / rain / snow / dust / explosion /
                  trail / confetti / bubbles / thruster_exhaust / reentry_sparks /
                  asteroid_debris / solar_wind / damage_burst
 
+ParticleShape  (enum) — controls rendered shape of each particle
+  Circle                       default; filled circle
+  Ellipse  { aspect_ratio }    width=size, height=size*aspect_ratio
+  Square                       axis-aligned or velocity-rotated square
+  Rect     { aspect_ratio }    width=size, height=size*aspect_ratio (rectangular)
+  Soft     { roundness: 0..1 } rounded rect; 1.0 = circle, 0.0 = sharp square
+
 EmitterBuilder::new(name) → .origin / rate / lifetime / velocity / spread /
-                             size / color / gravity_scale / collision /
-                             render_layer / .build() -> Emitter
+                             size / size_end / color / color_end /
+                             shape / align_to_velocity / interpolate_position /
+                             gravity_scale / collision / render_layer /
+                             .build() -> Emitter
+  size_end(f32)              target size at end-of-life; -1.0 = keep spawn size
+  color_end(r,g,b,a)         fade to this colour/alpha over lifetime
+  shape(ParticleShape)       default = Circle
+  align_to_velocity(bool)    rotate particle to face its velocity direction
+  interpolate_position(bool) spread spawns along per-frame path (fills gaps at speed)
 
 CollisionResponse: None / Bounce { elasticity } / Die
 

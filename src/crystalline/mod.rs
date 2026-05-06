@@ -12,5 +12,5 @@ pub use types::{
 pub use broadphase::{Aabb, AabbPairFinder};
 pub use solver::CrystallinePhysics;
 pub use solver::SleepState;
-pub use particles::types::{CollisionResponse, Emitter, EmitterBuilder, Particle};
+pub use particles::types::{CollisionResponse, Emitter, EmitterBuilder, Particle, ParticleShape};
 pub use particles::system::{ParticleState, ParticleStepResult, ParticleSystem};

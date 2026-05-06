@@ -36,7 +36,7 @@ It is designed for projects where you own the full screen and want direct contro
 
 **Input** — Mouse (press, release, move, scroll) and keyboard callbacks with full modifier key support.
 
-**Physics** — Crystalline, an impulse-based rigid body solver. Configurable presets (platformer, arcade, realistic). Particle emitters with named presets (fire, sparks, smoke, explosion, and more). Planet gravity with linear and inverse-square falloff.
+**Physics** — Crystalline, an impulse-based rigid body solver. Configurable presets (platformer, arcade, realistic). Particle emitters with named presets (fire, sparks, smoke, explosion, and more). Emitters support per-particle shape (`Circle`, `Ellipse`, `Square`, `Rect`, `Soft`), size and color animation over lifetime, velocity-aligned rotation, and sub-frame position interpolation to fill gaps at high speed. Planet gravity with linear and inverse-square falloff.
 
 **Camera** — Follows a target object with configurable lerp speed. Smooth zoom with cursor-anchored pivot. World↔screen coordinate conversion.
 

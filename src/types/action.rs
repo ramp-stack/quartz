@@ -3,6 +3,7 @@ use crate::object::GameObject;
 use crate::value::{Expr, MathOp};
 use crate::sound::SoundOptions;
 use crate::crystalline::{PhysicsMaterial, PhysicsQuality, Emitter, CollisionResponse};
+use crate::crystalline::particles::types::ParticleShape;
 use crate::constraints::{GrappleConstraint, SwingBias};
 use crate::camera::{FlashMode, FlashEase};
 use super::targeting::{Target, Location};
@@ -89,6 +90,17 @@ pub enum Action {
     SetEmitterGravityScale  { name: String, value: f32 },
     SetEmitterCollision     { name: String, value: CollisionResponse },
     SetEmitterRenderLayer   { name: String, value: i32 },
+    /// Fade particle size from spawn size to `value` over lifetime. Use `0.0` to taper to nothing.
+    SetEmitterSizeEnd           { name: String, value: f32 },
+    /// Fade particle colour from spawn colour to `value` over lifetime. `None` disables fade.
+    SetEmitterColorEnd          { name: String, value: Option<(u8, u8, u8, u8)> },
+    /// Set the rendered shape for newly emitted particles.
+    SetEmitterShape             { name: String, value: ParticleShape },
+    /// When `true`, each particle auto-rotates to face its velocity direction each frame.
+    SetEmitterAlignToVelocity   { name: String, value: bool },
+    /// When `true`, particles are distributed along the path the emitter travelled
+    /// this frame, eliminating gaps at high speed.
+    SetEmitterInterpolatePosition { name: String, value: bool },
 
     // -- Render layer ---
     SetRenderLayer  { target: Target, layer: i32 },
@@ -294,6 +306,30 @@ impl Action {
     }
     pub fn set_emitter_render_layer(name: impl Into<String>, value: i32) -> Self {
         Action::SetEmitterRenderLayer { name: name.into(), value }
+    }
+    /// Fade particle size from spawn size to `value` over lifetime. Use `0.0` to taper to nothing.
+    pub fn set_emitter_size_end(name: impl Into<String>, value: f32) -> Self {
+        Action::SetEmitterSizeEnd { name: name.into(), value }
+    }
+    /// Fade particle colour to `(r,g,b,a)` over lifetime.
+    pub fn set_emitter_color_end(name: impl Into<String>, r: u8, g: u8, b: u8, a: u8) -> Self {
+        Action::SetEmitterColorEnd { name: name.into(), value: Some((r, g, b, a)) }
+    }
+    /// Clear any colour-end fade.
+    pub fn clear_emitter_color_end(name: impl Into<String>) -> Self {
+        Action::SetEmitterColorEnd { name: name.into(), value: None }
+    }
+    /// Set the rendered shape for newly emitted particles.
+    pub fn set_emitter_shape(name: impl Into<String>, shape: ParticleShape) -> Self {
+        Action::SetEmitterShape { name: name.into(), value: shape }
+    }
+    /// When `true`, particles auto-rotate to face their velocity each frame.
+    pub fn set_emitter_align_to_velocity(name: impl Into<String>, value: bool) -> Self {
+        Action::SetEmitterAlignToVelocity { name: name.into(), value }
+    }
+    /// When `true`, particles are spread along the emitter's per-frame path.
+    pub fn set_emitter_interpolate_position(name: impl Into<String>, value: bool) -> Self {
+        Action::SetEmitterInterpolatePosition { name: name.into(), value }
     }
     pub fn set_render_layer(target: Target, layer: i32) -> Self {
         Action::SetRenderLayer { target, layer }

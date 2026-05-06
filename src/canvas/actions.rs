@@ -467,6 +467,21 @@ impl Canvas {
             Action::SetEmitterRenderLayer { name, value } => {
                 if let Some(ps) = &mut self.particle_system { ps.set_emitter_render_layer(&name, value); }
             }
+            Action::SetEmitterSizeEnd { name, value } => {
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_size_end(&name, value); }
+            }
+            Action::SetEmitterColorEnd { name, value } => {
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_color_end(&name, value); }
+            }
+            Action::SetEmitterShape { name, value } => {
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_shape(&name, value); }
+            }
+            Action::SetEmitterAlignToVelocity { name, value } => {
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_align_to_velocity(&name, value); }
+            }
+            Action::SetEmitterInterpolatePosition { name, value } => {
+                if let Some(ps) = &mut self.particle_system { ps.set_emitter_interpolate_position(&name, value); }
+            }
             Action::SetRenderLayer { target, layer } => {
                 self.store.apply_to_targets(&target, |obj| obj.layer = layer);
                 self.rebuild_render_order();

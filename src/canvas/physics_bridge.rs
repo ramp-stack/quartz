@@ -570,7 +570,7 @@ impl Canvas {
     /// apply results → particles → visuals → legacy collision events.
     /// Called from the tick loop when crystalline is enabled.
     pub(crate) fn run_crystalline_step(&mut self, delta_time: f32) {
-        // Sync emitter origins to attached objects.
+        // Sync emitter origins to attached objects (pre-step: using last frame's positions).
         sync_emitter_origins(self);
 
         // Inject planet gravity forces before stepping.
@@ -590,6 +590,12 @@ impl Canvas {
         // arc and strips outward radial velocity. Must happen after the
         // solver integrates forces/velocity so corrections override.
         self.enforce_grapple_constraints();
+
+        // Re-sync emitter origins using the freshly-committed positions from
+        // this frame's physics result. Without this second sync, particles
+        // would always spawn at the *previous* frame's object position,
+        // causing visible lag between the object and its emitters at speed.
+        sync_emitter_origins(self);
 
         // Step particle system.
         if let Some(ps) = &mut self.particle_system {
@@ -635,16 +641,46 @@ impl Canvas {
             .unwrap_or((0.0, 0.0));
 
         for ps in &self.last_particle_states {
+            use crate::crystalline::particles::types::ParticleShape;
             let (r, g, b, a) = ps.color;
             let s = ps.size * scale;
+            let shape_type = match &ps.shape {
+                ParticleShape::Circle => {
+                    ShapeType::RoundedRectangle(0.0, (s, s), ps.rotation, s * 0.5)
+                }
+                ParticleShape::Ellipse { aspect_ratio } => {
+                    ShapeType::Ellipse(0.0, (s, s * aspect_ratio), ps.rotation)
+                }
+                ParticleShape::Square => {
+                    ShapeType::Rectangle(0.0, (s, s), ps.rotation)
+                }
+                ParticleShape::Rect { aspect_ratio } => {
+                    ShapeType::Rectangle(0.0, (s, s * aspect_ratio), ps.rotation)
+                }
+                ParticleShape::Soft { roundness } => {
+                    let r_px = s * roundness.clamp(0.0, 1.0) * 0.5;
+                    ShapeType::RoundedRectangle(0.0, (s, s), ps.rotation, r_px)
+                }
+            };
             self.particle_images.push(Image {
-                shape: ShapeType::RoundedRectangle(ps.rotation, (s, s), 0.0, s * 0.5),
+                shape: shape_type,
                 image: Arc::clone(&white_pixel),
                 color: Some(Color(r, g, b, a)),
             });
+            // ps.position is the particle's world CENTER.  Subtract the shape
+            // half-extents so the top-left draw position centers the shape on
+            // that world point.  Non-square shapes (Ellipse, Rect) have
+            // different Y half-extent (size * aspect_ratio * 0.5).
+            let (half_w, half_h) = match &ps.shape {
+                ParticleShape::Ellipse { aspect_ratio } =>
+                    (ps.size * 0.5, ps.size * aspect_ratio * 0.5),
+                ParticleShape::Rect { aspect_ratio } =>
+                    (ps.size * 0.5, ps.size * aspect_ratio * 0.5),
+                _ => (ps.size * 0.5, ps.size * 0.5),
+            };
             self.layout.particle_offsets.push((
-                ps.position.0 - cam_x,
-                ps.position.1 - cam_y,
+                ps.position.0 - cam_x - half_w,
+                ps.position.1 - cam_y - half_h,
             ));
             self.particle_render_layers.push(ps.render_layer);
         }

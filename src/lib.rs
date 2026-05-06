@@ -65,7 +65,7 @@ pub use crystalline::{
     PhysicsMaterial, PhysicsConfig, PhysicsQuality,
     CrystallinePhysics, PhysicsBody, PhysicsStepResult, BodyUpdate,
     ParticleSystem, ParticleState, ParticleStepResult,
-    Emitter, EmitterBuilder, Particle, CollisionResponse,
+    Emitter, EmitterBuilder, Particle, CollisionResponse, ParticleShape,
 };
 pub use constraints::{
     GrappleConstraint, GrappleCorrection, DistanceConstraint, SpringConstraint,
@@ -131,7 +131,7 @@ pub mod prelude {
         PhysicsMaterial, PhysicsConfig, PhysicsQuality,
         CrystallinePhysics, PhysicsBody, PhysicsStepResult, BodyUpdate,
         ParticleSystem, ParticleState, ParticleStepResult,
-        Emitter, EmitterBuilder, Particle, CollisionResponse,
+        Emitter, EmitterBuilder, Particle, CollisionResponse, ParticleShape,
     };
 
     pub use crate::constraints::{
